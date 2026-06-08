@@ -1,0 +1,13 @@
+.actions{ display:flex; gap: 12px; align-items:center; }
+.list{ display:flex; flex-direction:column; gap: 14px; margin-top: 6px; }
+.orderCard{ background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:18px; padding:16px; }
+.orderTop{ display:flex; justify-content:space-between; gap: 14px; }
+.orderId{ font-weight:1000; letter-spacing:-0.3px; }
+.tableLine{ margin-top: 8px; display:flex; align-items:center; gap: 10px; }
+.tableLabel{ font-weight:1000; padding:6px 10px; border-radius:999px; background: rgba(255,204,77,0.18); border:1px solid rgba(255,204,77,0.4); }
+.tableValue{ font-weight:1000; color: rgba(255,204,77,0.98); font-size:16px; }
+.badge{ padding:8px 12px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); font-weight:1000; }
+.items{ margin-top: 12px; display:flex; flex-direction:column; gap: 8px; }
+.itemRow{ padding:10px 12px; border-radius:14px; background: rgba(0,0,0,0.14); border:1px solid rgba(255,255,255,0.08); }
+.bottom{ margin-top: 12px; display:flex; gap: 12px; justify-content:flex-end; align-items:center; }
+

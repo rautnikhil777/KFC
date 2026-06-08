@@ -1,0 +1,14 @@
+.itemCard{
+  background: rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.12);
+  border-radius:16px;
+  padding:14px;
+  min-height: 210px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.itemTop{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.itemName{ font-weight:950; letter-spacing:-0.3px; font-size:16px; }
+.price{ font-weight:1000; color: rgba(255,204,77,0.95); }
+.noteLabel{ font-weight:900; font-size:12px; color: rgba(255,255,255,0.72); margin-top:4px; }

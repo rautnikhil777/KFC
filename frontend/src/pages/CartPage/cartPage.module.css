@@ -1,0 +1,28 @@
+.list{ overflow:auto; }
+.qtyRow{ display:flex; align-items:center; gap:10px; }
+.qtyBtn{
+  width:34px; height:34px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.9);
+  cursor:pointer;
+  font-weight:1000;
+}
+.qtyVal{ min-width:26px; text-align:center; font-weight:1000; }
+.remove{
+  background: rgba(255,77,77,0.12);
+  border:1px solid rgba(255,77,77,0.35);
+  color: rgba(255,255,255,0.92);
+  padding:10px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-weight:900;
+}
+.footer{
+  display:flex; justify-content:space-between; align-items:center;
+  margin-top:16px;
+  gap:12px;
+}
+.actions{ display:flex; gap:12px; align-items:center; }
+
