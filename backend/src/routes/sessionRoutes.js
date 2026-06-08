@@ -4,7 +4,10 @@ const { resolveTableForSession } = require('../services/tableResolver')
 
 const router = express.Router()
 
-router.post('/session/create', async (req, res) => {
+// Frontend contract:
+// POST /api/session/createOrResume
+router.post('/createOrResume', async (req, res) => {
+
   const { language, mode } = req.body || {}
   if (!mode || !['voice', 'touch'].includes(mode)) {
     return res.status(400).json({ error: 'mode must be voice or touch' })
