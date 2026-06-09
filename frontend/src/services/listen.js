@@ -3,40 +3,37 @@ let listening = false
 let stoppedManually = false
 let onResultCb = null
 let onErrorCb = null
+let onSpeechStartCb = null
+
+let silenceTimer = null
+let silenceMs = 900
+let lastProcessedIndex = 0
+let speechStarted = false
 
 function getRecognitionCtor() {
   if (typeof window === 'undefined') return null
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
 }
 
-function normalizeResult(eventResult) {
-  // SpeechRecognitionResultList
-  // We want the best final transcript and confidence if available.
-  try {
-    const results = eventResult || []
-    // Prefer first result that is final
-    let bestTranscript = ''
-    let bestConfidence = 0
+function getActiveTranscript(results, startIndex) {
+  let transcript = ''
+  let hasFinal = false
+  let bestConfidence = 0
 
-    for (let i = 0; i < results.length; i++) {
-      const res = results[i]
-      const alt = res?.[0]
-      const text = alt?.transcript
-      const conf = typeof alt?.confidence === 'number' ? alt.confidence : 0
-
-      if (res?.isFinal && text) {
-        return { transcript: text.trim(), confidence: conf }
+  for (let i = startIndex; i < results.length; i++) {
+    const res = results[i]
+    if (res && res[0]) {
+      transcript += res[0].transcript + ' '
+      if (res.isFinal) {
+        hasFinal = true
       }
-      if (text && text.trim().length > bestTranscript.length) {
-        bestTranscript = text
+      const conf = typeof res[0].confidence === 'number' ? res[0].confidence : 0
+      if (conf > bestConfidence) {
         bestConfidence = conf
       }
     }
-
-    return { transcript: bestTranscript.trim(), confidence: bestConfidence || 0 }
-  } catch {
-    return { transcript: '', confidence: 0 }
   }
+  return { transcript: transcript.trim(), hasFinal, confidence: bestConfidence }
 }
 
 function createRecognition() {
@@ -48,12 +45,49 @@ function createRecognition() {
   r.interimResults = true
   r.lang = 'en-US'
 
+  r.onspeechstart = () => {
+    if (onSpeechStartCb && !speechStarted) {
+      speechStarted = true
+      onSpeechStartCb()
+    }
+  }
+
   r.onresult = (event) => {
-    const payload = normalizeResult(event.results)
-    if (!payload.transcript) return
+    if (onSpeechStartCb && !speechStarted) {
+      speechStarted = true
+      onSpeechStartCb()
+    }
+
+    const { transcript, hasFinal, confidence } = getActiveTranscript(event.results, lastProcessedIndex)
+    if (!transcript) return
 
     if (onResultCb) {
-      onResultCb({ transcript: payload.transcript, confidence: payload.confidence })
+      onResultCb({ transcript, confidence, isFinal: false })
+    }
+
+    if (silenceTimer) clearTimeout(silenceTimer)
+    silenceTimer = setTimeout(() => {
+      if (onResultCb && transcript) {
+        onResultCb({ transcript, confidence, isFinal: true })
+      }
+      lastProcessedIndex = event.results.length
+      speechStarted = false
+      if (silenceTimer) {
+        clearTimeout(silenceTimer)
+        silenceTimer = null
+      }
+    }, silenceMs)
+
+    if (hasFinal) {
+      if (silenceTimer) {
+        clearTimeout(silenceTimer)
+        silenceTimer = null
+      }
+      if (onResultCb && transcript) {
+        onResultCb({ transcript, confidence, isFinal: true })
+      }
+      lastProcessedIndex = event.results.length
+      speechStarted = false
     }
   }
 
@@ -63,13 +97,20 @@ function createRecognition() {
 
   r.onend = () => {
     listening = false
+    speechStarted = false
+    if (silenceTimer) {
+      clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
     if (!stoppedManually) {
       // Auto-restart continuous listening
-      // Delay a bit to avoid rapid restart loops.
       setTimeout(() => {
         if (onResultCb) {
-          // resume with last config by reusing recognition instance
-          startListening({ lang: recognition?.lang, onResult: onResultCb, onError: onErrorCb, autoRestart: true })
+          try {
+            startListening({ lang: recognition?.lang, silenceMs, onSpeechStart: onSpeechStartCb, onResult: onResultCb, onError: onErrorCb })
+          } catch (e) {
+            console.error('Failed to restart listening:', e)
+          }
         }
       }, 250)
     }
@@ -78,26 +119,39 @@ function createRecognition() {
   return r
 }
 
-export function startListening({ lang, onResult, onError } = {}) {
+export function startListening({ lang, silenceMs: customSilenceMs, onSpeechStart, onResult, onError } = {}) {
   const Ctor = getRecognitionCtor()
   if (!Ctor) {
     throw new Error('SpeechRecognition is not supported in this browser.')
   }
 
+  onResultCb = typeof onResult === 'function' ? onResult : null
+  onErrorCb = typeof onError === 'function' ? onError : null
+  onSpeechStartCb = typeof onSpeechStart === 'function' ? onSpeechStart : null
+
+  if (customSilenceMs) {
+    silenceMs = customSilenceMs
+  }
+
+  stoppedManually = false
+
   if (!recognition) recognition = createRecognition()
   if (!recognition) throw new Error('Failed to initialize SpeechRecognition')
 
-  onResultCb = typeof onResult === 'function' ? onResult : null
-  onErrorCb = typeof onError === 'function' ? onError : null
-
-  stoppedManually = false
   recognition.lang = lang || recognition.lang || 'en-US'
+  lastProcessedIndex = 0
+  speechStarted = false
+
+  if (silenceTimer) {
+    clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
 
   try {
     listening = true
     recognition.start()
   } catch (e) {
-    // Some browsers throw if start called twice; treat as non-fatal.
+    // Treat start called twice as non-fatal
     listening = true
   }
 
@@ -109,9 +163,14 @@ export function startListening({ lang, onResult, onError } = {}) {
 export function stopListening() {
   stoppedManually = true
   listening = false
+  speechStarted = false
+  if (silenceTimer) {
+    clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
   try {
     recognition?.stop()
-  } catch {
+  } catch (e) {
     // ignore
   }
 }
@@ -119,4 +178,3 @@ export function stopListening() {
 export function isListening() {
   return listening
 }
-

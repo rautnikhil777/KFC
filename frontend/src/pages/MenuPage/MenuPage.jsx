@@ -128,6 +128,35 @@ export default function MenuPage() {
             <div className="h1">{copy.title}</div>
             <div className="muted" style={{ fontWeight: 800 }}>{copy.subtitle}</div>
 
+            {state.mode === 'voice' && voiceCtrl?.voiceStatus && (
+              <div className="voice-status-badge" style={{
+                marginTop: 8,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 12,
+                fontSize: '0.85rem',
+                fontWeight: 'bold',
+                backgroundColor:
+                  voiceCtrl.voiceStatus === 'SPEAKING' ? '#0070f3' :
+                  voiceCtrl.voiceStatus === 'LISTENING' ? '#10b981' :
+                  voiceCtrl.voiceStatus === 'PROCESSING' ? '#f59e0b' : '#6b7280',
+                color: '#fff',
+              }}>
+                <span className="dot" style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#fff',
+                  display: 'inline-block',
+                }} />
+                {voiceCtrl.voiceStatus === 'LISTENING' ? 'Listening' :
+                 voiceCtrl.voiceStatus === 'PROCESSING' ? 'Understanding' :
+                 voiceCtrl.voiceStatus === 'SPEAKING' ? 'Speaking' : 'Idle'}
+              </div>
+            )}
+
             <div style={{ marginTop: 10 }} className="chipRow">
               {(menu || []).map((c) => (
                 <div

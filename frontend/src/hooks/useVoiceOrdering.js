@@ -1,62 +1,84 @@
-import { useContext, useEffect, useMemo, useRef } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useNavigate } from 'react-router-dom'
 import { OrderSessionContext } from '../context/OrderSessionContext.jsx'
 import { apiConfirmOrder, apiPayDummy } from '../services/api.js'
-import { parseVoice } from '../services/intentParser.js'
+import {
+  CATEGORY_DISPLAY_NAMES,
+  detectCategoryIntent,
+  isAmbiguousQuantity,
+  isRepeatLastIntent,
+  parseVoice,
+} from '../services/intentParser.js'
 import { isListening, startListening, stopListening } from '../services/listen.js'
-import { speak, stopSpeak } from '../services/speak.js'
+import { isSpeaking, setSpeakStateListener, speak, stopSpeak } from '../services/speak.js'
 
 function safeLang(stateLang) {
   if (stateLang === 'hi' || stateLang === 'mr' || stateLang === 'en') return stateLang
   return 'en'
 }
 
+function catLabel(key) {
+  return CATEGORY_DISPLAY_NAMES[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '')
+}
+
 const COPY = {
   en: {
-    welcome: 'Welcome to KFC. Please select language.',
-    startListening: 'Start listening',
-    stopListening: 'Stop listening',
-    anythingElse: 'Anything else?',
-    didntCatch: "I didn't catch that.",
-    added: 'Added.',
-    sendingKitchen: 'Sending to kitchen',
-    confirmOrder: 'Confirm order',
-    orderConfirmed: 'Order confirmed',
-    payNow: 'Pay now',
-    paymentCompleted: 'Payment completed',
-    orderReady: 'Ready',
-    orderPreparing: 'Preparing',
+    anythingElse:    'Anything else sir?',
+    didntCatch:      "Sir, I did not understand. You may choose starters, main course, drinks, or dessert.",
+    added:           'Added to cart.',
+    sendingKitchen:  'Your order has been sent to kitchen.',
+    orderPreparing:  'Preparing',
+    categoryPrompt:  'Sir, what would you like today? You may choose starters, main course, drinks, or dessert.',
+    whichItem:       'Which item sir?',
+    howMany:         'How many sir?',
+    emptCart:        'Your cart is empty. Please add some items first.',
+    noRepeat:        "I do not have a previous item to repeat. What would you like to order?",
+    notFound:        'I could not find that item. Please try again.',
+    cartGreeting:    'Sir, please review your order.',
+    cartEmpty:       'Sir, your cart is empty. Please go back to the menu and add items.',
+    switching:       (label) => `Okay sir, showing ${label}.`,
+    opening:         (label) => `Sir, currently showing ${label}. You may order items or switch category.`,
+    whatOrder:       'What would you like to order?',
+    recovery:        'Sir, I did not understand. You may choose starters, main course, drinks or dessert.',
   },
   hi: {
-    welcome: 'KFC में आपका स्वागत है। कृपया भाषा चुनें।',
-    startListening: 'सुनना शुरू करें',
-    stopListening: 'सुनना बंद करें',
-    anythingElse: 'कुछ और?',
-    didntCatch: "मुझे समझ नहीं आया।",
-    added: 'जोड़ दिया।',
-    sendingKitchen: 'किचन को भेज रहे हैं',
-    confirmOrder: 'ऑर्डर कन्फर्म करें',
-    orderConfirmed: 'ऑर्डर कन्फर्म हो गया',
-    payNow: 'अभी भुगतान करें',
-    paymentCompleted: 'भुगतान पूरा हो गया',
-    orderReady: 'तैयार',
-    orderPreparing: 'तैयार हो रहा है',
+    anythingElse:    'कुछ और चाहिए सर?',
+    didntCatch:      'मुझे समझ नहीं आया। कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स, या डेज़र्ट चुनें।',
+    added:           'कार्ट में जोड़ दिया।',
+    sendingKitchen:  'आपका ऑर्डर किचन को भेज दिया गया।',
+    orderPreparing:  'तैयार हो रहा है',
+    categoryPrompt:  'सर, आज आप क्या लेना चाहेंगे? आप स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट चुन सकते हैं।',
+    whichItem:       'कौन सा आइटम सर?',
+    howMany:         'कितने सर?',
+    emptCart:        'कार्ट खाली है।',
+    noRepeat:        'कोई पिछला आइटम नहीं मिला।',
+    notFound:        'वह आइटम नहीं मिला।',
+    cartGreeting:    'सर, ये आपके चुने हुए आइटम हैं। कृपया जाँचें और ऑर्डर कन्फर्म करें।',
+    cartEmpty:       'सर, कार्ट खाली है।',
+    switching:       (label) => `ठीक है सर, ${label} दिखा रहे हैं।`,
+    opening:         (label) => `सर, अभी ${label} दिखाया जा रहा है।`,
+    whatOrder:       'आप क्या ऑर्डर करना चाहेंगे?',
+    recovery:        'सर, समझ नहीं आया। कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट चुनें।',
   },
   mr: {
-    welcome: 'KFC मध्ये आपले स्वागत आहे. कृपया भाषा निवडा.',
-    startListening: 'ऐकायला सुरू करा',
-    stopListening: 'ऐकणे थांबवा',
-    anythingElse: 'काही अजून?',
-    didntCatch: "मला समजलं नाही.",
-    added: 'जोडले.',
-    sendingKitchen: 'किचनला पाठवत आहोत',
-    confirmOrder: 'ऑर्डर कन्फर्म करा',
-    orderConfirmed: 'ऑर्डर कन्फर्म झाली',
-    payNow: 'आता पैसे द्या',
-    paymentCompleted: 'पेमेंट पूर्ण',
-    orderReady: 'तयार',
-    orderPreparing: 'तयार होत आहे',
+    anythingElse:    'काही अजून सर?',
+    didntCatch:      'मला समजलं नाही. कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स, किंवा डेझर्ट निवडा.',
+    added:           'कार्टमध्ये जोडले.',
+    sendingKitchen:  'आपला ऑर्डर किचनला पाठवला.',
+    orderPreparing:  'तयार होत आहे',
+    categoryPrompt:  'सर, आज आपण काय घेणार आहात? आपण स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट निवडू शकता.',
+    whichItem:       'कोणता आयटम सर?',
+    howMany:         'किती सर?',
+    emptCart:        'कार्ट रिकामे आहे.',
+    noRepeat:        'मागील आयटम सापडला नाही.',
+    notFound:        'तो आयटम सापडला नाही.',
+    cartGreeting:    'सर, हे आपले निवडलेले आयटम आहेत. कृपया तपासा आणि ऑर्डर कन्फर्म करा.',
+    cartEmpty:       'सर, कार्ट रिकामे आहे.',
+    switching:       (label) => `ठीक आहे सर, ${label} दाखवत आहे.`,
+    opening:         (label) => `सर, सध्या ${label} दाखवत आहे.`,
+    whatOrder:       'आपण काय ऑर्डर करणार आहात?',
+    recovery:        'सर, समजलं नाही. कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट निवडा.',
   },
 }
 
@@ -69,371 +91,279 @@ export function useVoiceOrdering({
   const nav = useNavigate()
   const { state, addCartItemLocal, removeCartItemLocal, setCart } = useContext(OrderSessionContext)
 
-
-  // We keep menuItems in controller state; voice parsing needs concrete menu item objects.
   const menuItemsRef = useRef(menuItems || null)
-  useEffect(() => {
-    menuItemsRef.current = menuItems || null
-  }, [menuItems])
-
-
-
-
+  useEffect(() => { menuItemsRef.current = menuItems || null }, [menuItems])
 
   const lang = safeLang(state.language)
-  // Expose language for controller-page integration that triggers auto-start.
-
   const copy = useMemo(() => COPY[lang] || COPY.en, [lang])
 
-  const listeningRef = useRef(false)
-  const queuedVoiceActionRef = useRef(null)
-  const lastHandledTranscriptRef = useRef('')
-  const suppressDuringSpeakRef = useRef(false)
+  const [voiceStatus, setVoiceStatus] = useState('IDLE')
 
-  function speakQueued(text, l = lang) {
-    suppressDuringSpeakRef.current = true
+  const listeningRef             = useRef(false)
+  const lastHandledTranscriptRef = useRef('')
+
+  const stepRef        = useRef('IDLE') // MENU_ENTRY | CATEGORY_SELECTION | ITEM_SELECTION | WAITING_FOR_QTY | ANYTHING_ELSE | CART_CONFIRM | KITCHEN | PAYMENT
+  const commandLockRef = useRef(false)
+  const debounceRef    = useRef(null)
+
+  const silenceTimer1Ref     = useRef(null)
+  const silenceTimer2Ref     = useRef(null)
+  const anythingElseTimerRef = useRef(null)
+
+  const currentVoiceCategoryRef = useRef(null)
+  const lastAddedItemRef        = useRef(null)
+
+  // Clarification memory
+  const pendingItemRef          = useRef(null)
+  const pendingQtyRef           = useRef(null)
+
+  const onSelectCategoryRef = useRef(null)
+
+  function clearSilenceTimers() {
+    if (silenceTimer1Ref.current)     { clearTimeout(silenceTimer1Ref.current);     silenceTimer1Ref.current     = null }
+    if (silenceTimer2Ref.current)     { clearTimeout(silenceTimer2Ref.current);     silenceTimer2Ref.current     = null }
+    if (anythingElseTimerRef.current) { clearTimeout(anythingElseTimerRef.current); anythingElseTimerRef.current = null }
+  }
+
+  function speakNow(text, l = lang) {
+    stopSpeak()
+    setVoiceStatus('SPEAKING')
     speak(text, l)
-    setTimeout(() => {
-      suppressDuringSpeakRef.current = false
-    }, 650)
+  }
+
+  async function confirmOrderFromVoice() {
+    if (!state.sessionId) return
+    if (!state.cart.items.length) return
+    const orderRes = await apiConfirmOrder({
+      sessionId: state.sessionId,
+      cartItems: state.cart.items,
+    })
+    setCart({ items: [] })
+    nav(`/kitchen?orderId=${encodeURIComponent(orderRes.orderId)}`)
+    return orderRes
+  }
+
+  function getItemsForCategory(catKey) {
+    const all = menuItemsRef.current || []
+    if (!catKey) return all
+    const k = String(catKey).toLowerCase().trim()
+    return all.filter((it) => {
+      const cat = String(it?.category || '').toLowerCase().trim()
+      if (!cat) return false
+      if (cat === k) return true
+      if (cat.includes(k) || k.includes(cat)) return true
+      if ((k === 'mains' || k === 'main course') && cat.includes('main')) return true
+      if (k === 'starter'  && (cat.includes('starter') || cat.includes('start')))    return true
+      if (k === 'drinks'   && (cat.includes('drink')   || cat.includes('beverage'))) return true
+      if (k === 'dessert'  && (cat.includes('dessert')  || cat.includes('sweet')))   return true
+      return false
+    })
+  }
+
+  function applyCategory(catKey, switching = false) {
+    currentVoiceCategoryRef.current = catKey
+    stepRef.current = 'CATEGORY_SELECTION'
+    clearSilenceTimers()
+
+    if (typeof onSelectCategoryRef.current === 'function') {
+      onSelectCategoryRef.current(catKey)
+    }
+
+    const label    = catLabel(catKey)
+    const catItems = getItemsForCategory(catKey)
+    const first5   = catItems.slice(0, 5)
+    const names    = first5.map((it) => it.name).filter(Boolean).join(', ')
+
+    let text = switching ? copy.switching(label) : copy.opening(label)
+    if (names) {
+      text += ` Sir, these are available options: ${names}. ${copy.whatOrder}`
+    } else {
+      text += ` ${copy.whatOrder}`
+    }
+
+    speakNow(text, lang)
+  }
+
+  function addItemAndSchedule(menuItem, qty) {
+    addCartItemLocal({ ...menuItem, quantity: qty || 1, notes: '' })
+    lastAddedItemRef.current = menuItem
+    if (onCartUpdated) onCartUpdated()
+    clearSilenceTimers()
+
+    speakNow(copy.added, lang)
+    stepRef.current = 'ANYTHING_ELSE'
+
+    silenceTimer1Ref.current = setTimeout(() => {
+      if (stepRef.current !== 'ANYTHING_ELSE') return
+      speakNow(copy.anythingElse, lang)
+
+      silenceTimer2Ref.current = setTimeout(() => {
+        if (stepRef.current !== 'ANYTHING_ELSE') return
+        speakNow(copy.anythingElse, lang)
+
+        anythingElseTimerRef.current = setTimeout(() => {
+          if (stepRef.current !== 'ANYTHING_ELSE') return
+          nav('/cart')
+        }, 5000)
+      }, 5000)
+    }, 4500)
+  }
+
+  function handleTranscript(rawTranscript) {
+    if (commandLockRef.current) return
+    commandLockRef.current = true
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      commandLockRef.current = false
+      setVoiceStatus(isListening() ? 'LISTENING' : 'IDLE')
+    }, 450)
+
+    if (!enabled) return
+    if (!rawTranscript) return
+
+    const norm = String(rawTranscript).trim().toLowerCase()
+    if (!norm) return
+    if (norm === lastHandledTranscriptRef.current) return
+    lastHandledTranscriptRef.current = norm
+
+    const lower = norm
+    const step  = stepRef.current
+
+    // Category Switching / Recognition can happen at ANY time when we are on MENU page
+    if (page === 'MENU') {
+      const catKey = detectCategoryIntent(rawTranscript)
+      if (catKey) {
+        const switching = currentVoiceCategoryRef.current !== null && currentVoiceCategoryRef.current !== catKey
+        applyCategory(catKey, switching)
+        return
+      }
+    }
+
+    // WAITING FOR QUANTITY state
+    if (step === 'WAITING_FOR_QTY') {
+      const parsedQty = isAmbiguousQuantity(rawTranscript) || isRepeatLastIntent(rawTranscript) ? null : parseInt(lower, 10)
+      const qty = parsedQty || parseInt(lower.match(/\d+/)?.[0] || '1', 10)
+      if (pendingItemRef.current) {
+        addItemAndSchedule(pendingItemRef.current, qty)
+        pendingItemRef.current = null
+        return
+      }
+    }
+
+    // WAITING FOR ITEM (ITEM_SELECTION) state when quantity was provided
+    if (step === 'ITEM_SELECTION') {
+      const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
+      if (parsed.intent === 'ADD_ITEM' && parsed.menuItem) {
+        addItemAndSchedule(parsed.menuItem, pendingQtyRef.current || 1)
+        pendingQtyRef.current = null
+        return
+      }
+    }
+
+    // ANYTHING_ELSE loop responses
+    if (step === 'ANYTHING_ELSE') {
+      const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
+      if (parsed.intent === 'YES') {
+        clearSilenceTimers()
+        stepRef.current = 'MENU_ENTRY'
+        speakNow(copy.categoryPrompt, lang)
+        return
+      }
+      if (parsed.intent === 'NO') {
+        clearSilenceTimers()
+        nav('/cart')
+        return
+      }
+    }
+
+    // CART page specific handling
+    if (page === 'CART') {
+      const parsed = parseVoice(rawTranscript, [])
+      if (parsed.intent === 'CONFIRM_ORDER' || parsed.intent === 'YES') {
+        if (!state.cart.items.length) {
+          speakNow(copy.emptCart, lang)
+          return
+        }
+        speakNow(copy.sendingKitchen, lang)
+        confirmOrderFromVoice().catch(() => {})
+        return
+      }
+      if (parsed.intent === 'REMOVE_ITEM') {
+        // Go back to menu if user wants to edit/change/remove
+        nav('/menu')
+        return
+      }
+    }
+
+    // General parsing fallbacks
+    const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
+    const intent = parsed.intent
+
+    if (intent === 'SWITCH_CATEGORY') {
+      if (page === 'MENU') {
+        const catKey = parsed.category
+        const switching = currentVoiceCategoryRef.current !== null && currentVoiceCategoryRef.current !== catKey
+        applyCategory(catKey, switching)
+      }
+      return
+    }
+
+    if (intent === 'AMBIGUOUS_QTY') {
+      if (page === 'MENU') {
+        pendingQtyRef.current = parsed.qty || 1
+        stepRef.current = 'ITEM_SELECTION'
+        speakNow(copy.whichItem, lang)
+      }
+      return
+    }
+
+    if (intent === 'ADD_ITEM_MISSING_QTY') {
+      if (page === 'MENU') {
+        pendingItemRef.current = parsed.menuItem
+        stepRef.current = 'WAITING_FOR_QTY'
+        speakNow(copy.howMany, lang)
+      }
+      return
+    }
+
+    if (intent === 'ADD_ITEM') {
+      if (page === 'MENU') {
+        if (!parsed.menuItem) {
+          speakNow(copy.notFound, lang)
+          return
+        }
+        addItemAndSchedule(parsed.menuItem, parsed.qty || 1)
+      }
+      return
+    }
+
+    if (intent === 'REPEAT_LAST') {
+      if (page === 'MENU') {
+        const last = lastAddedItemRef.current
+        if (!last?.menuItemId) {
+          speakNow(copy.noRepeat, lang)
+          return
+        }
+        addItemAndSchedule(last, parsed.qty || 1)
+      }
+      return
+    }
+
+    if (intent === 'TRACK_ORDER') {
+      if (page === 'KITCHEN') {
+        speakNow(copy.orderPreparing, lang)
+      }
+      return
+    }
   }
 
   const stopAll = () => {
     stopSpeak()
     stopListening()
     listeningRef.current = false
-    suppressDuringSpeakRef.current = false
-    queuedVoiceActionRef.current = null
-  }
-
-  async function confirmOrderFromVoice() {
-    // Used by voice CART_CONFIRM flow.
-
-    if (!state.sessionId) return
-    if (!state.cart.items.length) return
-
-    const orderRes = await apiConfirmOrder({
-      sessionId: state.sessionId,
-      cartItems: state.cart.items,
-    })
-
-    setCart({ items: [] })
-
-    // Move to kitchen
-    nav(`/kitchen?orderId=${encodeURIComponent(orderRes.orderId)}`)
-    return orderRes
-  }
-
-  async function payFromVoice(orderId) {
-    if (!orderId) return
-    await apiPayDummy({ orderId })
-    nav(`/bill/${encodeURIComponent(orderId)}`)
-  }
-
-
-  // Conversational state machine (voice-first ordering)
-  const stepRef = useRef('IDLE')
-  const commandLockRef = useRef(false)
-  const anythingElseTimerRef = useRef(null)
-  const debouncedTimerRef = useRef(null)
-
-
-  const categoryKeys = ['starter', 'mains', 'main course', 'drinks', 'dessert']
-
-  // Allow MenuPage to control active category via callback.
-  // We don't use backend/touch APIs.
-  const onSelectCategoryRef = useRef(null)
-  // Silence timers: repeat once then go to cart.
-  const silenceTimer1Ref = useRef(null)
-  const silenceTimer2Ref = useRef(null)
-
-  function normalizeCategoryKey(t) {
-
-    const x = String(t || '').toLowerCase().trim()
-    if (x.includes('starter')) return 'starter'
-    if (x.includes('dessert')) return 'dessert'
-    if (x.includes('drink')) return 'drinks'
-    if (x.includes('main course')) return 'main course'
-    if (x.includes('mains')) return 'mains'
-    if (x === 'main') return 'mains'
-    return null
-  }
-
-  function isYesIntent(t) {
-    const x = String(t || '').toLowerCase().trim()
-    return x === 'yes' || x === 'ha' || x === 'haa' || x === 'add more' || x === 'continue' || x === 'more' || x === 'another item' || x === 'another'
-  }
-
-  function isNoIntent(t) {
-    const x = String(t || '').toLowerCase().trim()
-    return x === 'no' || x === 'done' || x === 'enough' || x === 'confirm' || x === 'place order' || x === 'generate bill' || x === 'generate bill' || x.includes('place order') || x.includes('generate bill')
-  }
-
-  function extractNumberAndRemainder(text) {
-    const raw = String(text || '')
-    const norm = raw.toLowerCase().replace(/[,\.!?]/g, ' ')
-    const qtyMatch = norm.match(/(\d+)\s*(x|times)?\b/)
-    if (qtyMatch) {
-      const qty = Number(qtyMatch[1])
-      const remainder = norm.replace(qtyMatch[0], '').trim()
-      return { qty, remainder }
-    }
-    // number words best-effort
-    const words = {
-      one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    }
-    for (const [w, n] of Object.entries(words)) {
-      if (norm.startsWith(w + ' ')) {
-        const remainder = norm.replace(w, '').trim()
-        return { qty: n, remainder }
-      }
-    }
-    return { qty: null, remainder: norm.trim() }
-  }
-
-  function startMenuVoiceFlow() {
-    // MENU_PROMPT
-    stepRef.current = 'MENU_PROMPT'
-    if (typeof onSelectCategoryRef.current === 'function') {
-      // reset to first category via current UI; do not force if menu not loaded
-    }
-    speakQueued('What would you like sir?', lang)
-  }
-
-  useEffect(() => {
-    if (!enabled) return
-    if (page !== 'MENU') return
-    // Speak prompt when entering Menu in voice mode
-    // Only once per mount.
-    stepRef.current = 'IDLE'
-    startMenuVoiceFlow()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, page])
-
-  function handleTranscript(rawTranscript) {
-
-    // Debounce + command lock
-    if (commandLockRef.current) return
-    commandLockRef.current = true
-    if (debouncedTimerRef.current) clearTimeout(debouncedTimerRef.current)
-    debouncedTimerRef.current = setTimeout(() => {
-      commandLockRef.current = false
-    }, 450)
-
-    // Step gating: ignore transcripts while we're in silence-prompt timers.
-    if (anythingElseTimerRef.current && stepRef.current === 'ANYTHING_ELSE_WAITING') {
-      // allow intents to cancel the waiting loop
-    }
-
-
-    if (!enabled) return
-    if (!rawTranscript) return
-
-    // Avoid repeating same transcript
-    const norm = String(rawTranscript).trim().toLowerCase()
-    if (!norm) return
-    if (norm === lastHandledTranscriptRef.current) return
-    lastHandledTranscriptRef.current = norm
-
-    if (suppressDuringSpeakRef.current) return
-
-    // Phase-3 conversational parsing (category + yes/no + item)
-    const lower = norm
-    const categoryIntent = normalizeCategoryKey(lower)
-    const yesIntent = isYesIntent(lower)
-    const noIntent = isNoIntent(lower)
-
-    const step = stepRef.current
-
-    // CATEGORY selection step
-    if (page === 'MENU' && (step === 'MENU_PROMPT' || step === 'CATEGORY_SELECTED' || step === 'ADDING_ITEMS' || step === 'IDLE')) {
-      if (categoryIntent) {
-        stepRef.current = 'CATEGORY_SELECTED'
-
-        if (anythingElseTimerRef.current) clearTimeout(anythingElseTimerRef.current)
-
-        // Speak and update Menu UI via callback
-        if (typeof onSelectCategoryRef.current === 'function') {
-          onSelectCategoryRef.current(categoryIntent)
-        }
-
-        speakQueued('These are available. Please tell me your items.', lang)
-        return
-      }
-    }
-
-
-    // Anything-else waiting step
-    if (step === 'ANYTHING_ELSE_WAITING') {
-      if (yesIntent) {
-        if (anythingElseTimerRef.current) clearTimeout(anythingElseTimerRef.current)
-        if (silenceTimer1Ref.current) clearTimeout(silenceTimer1Ref.current)
-        if (silenceTimer2Ref.current) clearTimeout(silenceTimer2Ref.current)
-        stepRef.current = 'ADDING_ITEMS'
-        speakQueued('What would you like sir?', lang)
-        return
-      }
-      if (noIntent) {
-        nav('/cart')
-        return
-      }
-      // If user says category/item instead of yes, fall through to menu parsing.
-    }
-
-
-    // Cart confirm step (CART_CONFIRM)
-    if (page === 'CART') {
-      const confirmLike =
-        lower === 'yes' ||
-        lower === 'confirm' ||
-        lower === 'okay' ||
-        lower === 'place order' ||
-        lower.includes('place order') ||
-        lower.includes('confirm') ||
-        lower.includes('go ahead')
-
-      if (confirmLike) {
-        // Spec: speak prompt then confirm
-        speakQueued('Please confirm your order.', lang)
-        confirmOrderFromVoice().catch(() => {})
-        return
-      }
-
-      // YES intents that are not confirm-like are treated as confirmLike in spec
-      if (yesIntent) {
-        speakQueued('Please confirm your order.', lang)
-        confirmOrderFromVoice().catch(() => {})
-        return
-      }
-
-      // NO intents navigate back to touch-cart flow (no navigation here)
-      if (noIntent) {
-        return
-      }
-    }
-
-
-    const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
-
-
-    if (!parsed.intent) {
-      speakQueued(copy.didntCatch, lang)
-      return
-    }
-
-    const intent = parsed.intent
-
-    // Hybrid safety: voice actions should not break touch. They just operate on context.
-    if (intent === 'CHANGE_LANGUAGE') {
-      if (parsed.language && parsed.language !== state.language) {
-        // The session context already has setLanguage in controller pages;
-        // since hook can't set language directly without it, we rely on the existing LanguageSelector.
-        // Speak only; auto-navigation handled by page integration.
-        speakQueued(copy.didntCatch, lang)
-      }
-      return
-    }
-
-    if (intent === 'ADD_ITEM') {
-      // Strict step control: only accept items after category is selected.
-      if (page === 'MENU' && stepRef.current !== 'CATEGORY_SELECTED' && stepRef.current !== 'ADDING_ITEMS') {
-        speakQueued("Please tell me the category first.", lang)
-        return
-      }
-
-      // Phase-3: After adding, go to silence-waiting loop.
-      if (page !== 'MENU') {
-        // keep legacy behavior for non-menu pages
-      }
-
-      // Determine concrete menu item if we have it; parseVoice already best-matches.
-      const matched = parsed.menuItem
-
-      if (matched?.menuItemId) {
-        addCartItemLocal({
-          ...matched,
-          quantity: parsed.qty || 1,
-          notes: '',
-        })
-      } else {
-        // Without a concrete menu item id we cannot reliably add to cart.
-        speakQueued(copy.didntCatch, lang)
-        speakQueued('Please use touch to add items from the menu.', lang)
-        return
-      }
-
-
-      // After add: speak prompt and start silence auto-loop.
-      speakQueued(copy.added + ' Anything else sir?', lang)
-      onCartUpdated?.()
-
-      // Set silence timers ~10s (repeat once, then go cart)
-      stepRef.current = 'ANYTHING_ELSE_WAITING'
-
-      if (anythingElseTimerRef.current) clearTimeout(anythingElseTimerRef.current)
-      if (silenceTimer1Ref.current) clearTimeout(silenceTimer1Ref.current)
-      if (silenceTimer2Ref.current) clearTimeout(silenceTimer2Ref.current)
-
-      silenceTimer1Ref.current = setTimeout(() => {
-        // if still waiting, repeat once
-        if (stepRef.current !== 'ANYTHING_ELSE_WAITING') return
-        speakQueued('Anything else sir?', lang)
-        silenceTimer2Ref.current = setTimeout(() => {
-          if (stepRef.current !== 'ANYTHING_ELSE_WAITING') return
-          nav('/cart')
-        }, 10000)
-      }, 10000)
-
-      return
-
-
-    }
-
-    if (intent === 'REMOVE_ITEM') {
-      // Remove: remove first matching by best-match again
-      const matched = parseVoice(rawTranscript, menuItems || [])
-      const itemName = parsed.item || matched?.item
-      if (!itemName) return
-
-      const items = state.cart.items || []
-      const target = items.find((x) => String(x.name || '').toLowerCase() === String(itemName).toLowerCase())
-      if (target) {
-        removeCartItemLocal(target.menuItemId, target.name)
-      }
-      onCartUpdated?.()
-      return
-    }
-
-    if (intent === 'CONFIRM_ORDER') {
-      if (page === 'CART' || page === 'CONFIRM') {
-        speakQueued(copy.sendingKitchen, lang)
-        confirmOrderFromVoice().catch(() => {})
-      }
-      return
-    }
-
-    if (intent === 'TRACK_ORDER') {
-      // For kitchen/track screens we interpret this as navigate to track if possible
-      if (page === 'KITCHEN') {
-        // If there's orderId in query param, track page already has it.
-        // If user asks here, just navigate to the latest order in kitchen list isn't available in hook.
-        speakQueued(copy.orderPreparing, lang)
-        return
-      }
-      return
-    }
-
-    if (intent === 'PAY') {
-      // On track page, the orderId is in route param. Controller page integration should pass a callback.
-      // Hook just navigates if orderId was provided via onCartUpdated callback.
-      queuedVoiceActionRef.current?.()
-      return
-    }
-
-    if (intent === 'GENERATE_BILL') {
-      // For now, translate to pay-from-voice equivalent.
-      return
-    }
+    clearSilenceTimers()
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setVoiceStatus('IDLE')
   }
 
   useEffect(() => {
@@ -441,51 +371,78 @@ export function useVoiceOrdering({
       stopAll()
       return
     }
-
-    if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      // Speech API unsupported: do nothing.
-      return
-    }
-
-    // Only start listening once.
+    if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) return
     if (listeningRef.current) return
 
     try {
-      const { stop } = startListening({
+      startListening({
         lang,
+        silenceMs: 900,
+        onSpeechStart: () => {
+          if (isSpeaking()) {
+            stopSpeak()
+            setVoiceStatus('LISTENING')
+          }
+        },
         onResult: (res) => {
           const transcript = res?.transcript
           if (!transcript) return
-
-          // Handle only when there is a meaningful change
-          handleTranscript(transcript)
+          if (!res.isFinal) {
+            setVoiceStatus('PROCESSING')
+          } else {
+            handleTranscript(transcript)
+          }
         },
         onError: () => {},
       })
-      listeningRef.current = isListening()
-      void stop
-    } catch {
-      // ignore
+      listeningRef.current = true
+      setVoiceStatus('LISTENING')
+    } catch (e) {
+      console.error(e)
     }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, lang])
 
-  // cleanup
+  useEffect(() => {
+    if (!enabled) return
+    setSpeakStateListener((speakState) => {
+      if (speakState === 'SPEAKING') {
+        setVoiceStatus('SPEAKING')
+      } else {
+        setVoiceStatus(isListening() ? 'LISTENING' : 'IDLE')
+      }
+    })
+    return () => setSpeakStateListener(null)
+  }, [enabled])
+
+  // Entry flow triggers
+  useEffect(() => {
+    if (!enabled) return
+    if (page === 'MENU') {
+      stepRef.current = 'MENU_ENTRY'
+      speakNow(copy.categoryPrompt, lang)
+    } else if (page === 'CART') {
+      stepRef.current = 'CART_CONFIRM'
+      speakNow(copy.cartGreeting, lang)
+    } else if (page === 'KITCHEN') {
+      stepRef.current = 'KITCHEN'
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, page])
+
   useEffect(() => {
     return () => {
       stopAll()
-      if (debouncedTimerRef.current) {
-        clearTimeout(debouncedTimerRef.current)
-      }
+      setSpeakStateListener(null)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-
   return {
-    stop: stopAll,
-    listening: enabled && isListening(),
+    stop:                stopAll,
+    listening:           enabled && isListening(),
+    voiceStatus,
     setOnSelectCategory: (cb) => { onSelectCategoryRef.current = cb },
   }
-
 }
-
-

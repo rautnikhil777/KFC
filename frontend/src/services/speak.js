@@ -7,20 +7,24 @@ const LANG_MAP = {
 let currentUtterance = null
 let speaking = false
 let queue = []
+let speakStateListener = null
 
-function getBestVoice(targetLang) {
-  if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null
+export function setSpeakStateListener(cb) {
+  speakStateListener = cb
+}
 
-  const voices = window.speechSynthesis.getVoices() || []
-  if (!voices.length) return null
+export function isSpeaking() {
+  return speaking
+}
 
-  const wanted = (targetLang || '').toLowerCase()
-  const byLang = voices.find((v) => (v.lang || '').toLowerCase() === wanted)
-  if (byLang) return byLang
-
-  // Fallback: match prefix (e.g., hi -> hi-IN)
-  const prefix = wanted.split('-')[0]
-  return voices.find((v) => (v.lang || '').toLowerCase().startsWith(prefix)) || null
+function notifyState(state) {
+  if (speakStateListener) {
+    try {
+      speakStateListener(state)
+    } catch (e) {
+      console.error('Error in speakStateListener:', e)
+    }
+  }
 }
 
 export function stopSpeak() {
@@ -29,6 +33,7 @@ export function stopSpeak() {
   currentUtterance = null
   speaking = false
   queue = []
+  notifyState('IDLE')
 }
 
 function speakOne(text, lang) {
@@ -38,17 +43,29 @@ function speakOne(text, lang) {
   const targetLang = LANG_MAP[lang] || LANG_MAP.en
 
   utterance.lang = targetLang
-  const voice = getBestVoice(targetLang)
-  if (voice) utterance.voice = voice
+  const voices = window.speechSynthesis.getVoices() || []
+  if (voices.length > 0) {
+    const wanted = targetLang.toLowerCase()
+    const byLang = voices.find((v) => (v.lang || '').toLowerCase() === wanted)
+    if (byLang) {
+      utterance.voice = byLang
+    } else {
+      const prefix = wanted.split('-')[0]
+      const fallback = voices.find((v) => (v.lang || '').toLowerCase().startsWith(prefix))
+      if (fallback) utterance.voice = fallback
+    }
+  }
 
   utterance.onstart = () => {
     speaking = true
     currentUtterance = utterance
+    notifyState('SPEAKING')
   }
 
   utterance.onend = () => {
     speaking = false
     currentUtterance = null
+    notifyState('IDLE')
     // dequeue next
     const next = queue.shift()
     if (next) speakOne(next.text, next.lang)
@@ -57,6 +74,7 @@ function speakOne(text, lang) {
   utterance.onerror = () => {
     speaking = false
     currentUtterance = null
+    notifyState('IDLE')
     const next = queue.shift()
     if (next) speakOne(next.text, next.lang)
   }
@@ -86,4 +104,3 @@ export function speak(text, lang) {
   stopSpeak()
   queueSpeech(text, lang)
 }
-

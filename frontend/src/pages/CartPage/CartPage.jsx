@@ -6,6 +6,7 @@ import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
 import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiConfirmOrder } from '../../services/api.js'
+import { speak } from '../../services/speak.js'
 import styles from './cartPage.module.css'
 
 
@@ -67,12 +68,7 @@ export default function CartPage() {
     menuItems: [],
   })
 
-  // Phase-3 voice prompt: speak when cart opens in voice mode.
-  useEffect(() => {
-    if (state.mode !== 'voice') return
-    // We intentionally keep touch flow unchanged; voice only adds spoken guidance.
-    // Hook will also handle confirm intents.
-  }, [state.mode])
+
 
 
 
@@ -130,6 +126,35 @@ export default function CartPage() {
           <div>
             <div className="h1">{copy.title}</div>
             <div className="muted" style={{ fontWeight: 800 }}>{copy.subtitle}</div>
+
+            {state.mode === 'voice' && voiceCtrl?.voiceStatus && (
+              <div className="voice-status-badge" style={{
+                marginTop: 8,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 12,
+                fontSize: '0.85rem',
+                fontWeight: 'bold',
+                backgroundColor:
+                  voiceCtrl.voiceStatus === 'SPEAKING' ? '#0070f3' :
+                  voiceCtrl.voiceStatus === 'LISTENING' ? '#10b981' :
+                  voiceCtrl.voiceStatus === 'PROCESSING' ? '#f59e0b' : '#6b7280',
+                color: '#fff',
+              }}>
+                <span className="dot" style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#fff',
+                  display: 'inline-block',
+                }} />
+                {voiceCtrl.voiceStatus === 'LISTENING' ? 'Listening' :
+                 voiceCtrl.voiceStatus === 'PROCESSING' ? 'Understanding' :
+                 voiceCtrl.voiceStatus === 'SPEAKING' ? 'Speaking' : 'Idle'}
+              </div>
+            )}
           </div>
           <div style={{ minWidth: 220 }}>
             <CartSummary cartItems={state.cart.items} onGoCart={() => nav('/cart')} />
