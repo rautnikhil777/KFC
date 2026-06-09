@@ -1,11 +1,16 @@
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
+
 import { useNavigate } from 'react-router-dom'
 import LanguageSelector from '../../components/LanguageSelector/LanguageSelector.jsx'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiCreateOrResumeSession } from '../../services/api.js'
+import { speak } from '../../services/speak.js'
+
 
 const COPY = {
+
   en: {
     title: 'Welcome',
     subtitle: 'Choose Voice or Touch. Switch anytime.',
@@ -38,6 +43,23 @@ const COPY = {
 export default function WelcomePage() {
   const nav = useNavigate()
   const { state, setMode, setLanguage, resetSession, setSessionIdAndTable } = useContext(OrderSessionContext)
+
+  const voice = useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'WELCOME',
+    menuItems: [],
+  })
+
+  useEffect(() => {
+    if (state.mode !== 'voice') return
+    // Welcome speech once language is selected.
+    const t = setTimeout(() => {
+      speak('Welcome to KFC. Please select language.', state.language)
+    }, 50)
+    return () => clearTimeout(t)
+  }, [state.mode, state.language])
+
+
   const [busy, setBusy] = useState(false)
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])

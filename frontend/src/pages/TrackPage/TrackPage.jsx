@@ -2,8 +2,13 @@ import { useContext, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiOrderStatus, apiPayDummy } from '../../services/api.js'
 import styles from './trackPage.module.css'
+
+
+
+
 
 const COPY = {
   en: {
@@ -35,6 +40,13 @@ export default function TrackPage() {
   const [busy, setBusy] = useState(false)
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
+
+  useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'TRACK',
+    menuItems: [],
+  })
+
 
   async function load() {
     try {

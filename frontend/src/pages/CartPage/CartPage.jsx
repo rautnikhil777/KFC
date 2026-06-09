@@ -3,8 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import CartSummary from '../../components/CartSummary/CartSummary.jsx'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiConfirmOrder } from '../../services/api.js'
 import styles from './cartPage.module.css'
+
+
+
+
 
 const COPY = {
   en: {
@@ -54,6 +59,13 @@ export default function CartPage() {
   const [confirming, setConfirming] = useState(false)
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
+
+  useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'CART',
+    menuItems: [],
+  })
+
 
   async function confirm() {
     try {

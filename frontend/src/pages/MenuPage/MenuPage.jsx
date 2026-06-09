@@ -1,10 +1,13 @@
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+
 import CartSummary from '../../components/CartSummary/CartSummary.jsx'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiGetMenu } from '../../services/api.js'
 import styles from './menuPage.module.css'
+
 
 const COPY = {
   en: {
@@ -49,6 +52,16 @@ export default function MenuPage() {
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
 
+  useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'MENU',
+    menuItems: menu ? (menu || []).flatMap((c) => c.items || []) : [],
+    onCartUpdated: null,
+  })
+
+
+
+
   useEffect(() => {
     async function load() {
       try {
@@ -86,6 +99,7 @@ export default function MenuPage() {
       notes: notesByKey[item.menuItemId] || '',
     })
   }
+
 
   return (
     <div className="container">

@@ -2,8 +2,13 @@ import { useContext, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiKitchenGetOrders, apiKitchenSend } from '../../services/api.js'
 import styles from './kitchenPage.module.css'
+
+
+
+
 
 const COPY = {
   en: {
@@ -38,6 +43,13 @@ export default function KitchenPage() {
   const [polling, setPolling] = useState(true)
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
+
+  useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'KITCHEN',
+    menuItems: [],
+  })
+
 
   async function load() {
     try {

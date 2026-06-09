@@ -2,8 +2,13 @@ import { useContext, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
+import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiOrderStatus } from '../../services/api.js'
 import styles from './billPage.module.css'
+
+
+
+
 
 const COPY = {
   en: {
@@ -31,6 +36,13 @@ export default function BillPage() {
   const [order, setOrder] = useState(null)
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
+
+  useVoiceOrdering({
+    enabled: state.mode === 'voice',
+    page: 'BILL',
+    menuItems: [],
+  })
+
 
   useEffect(() => {
     async function load() {
