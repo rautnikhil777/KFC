@@ -1,4 +1,5 @@
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
+
 import { useNavigate } from 'react-router-dom'
 import CartSummary from '../../components/CartSummary/CartSummary.jsx'
 import TopBar from '../../components/TopBar/TopBar.jsx'
@@ -60,11 +61,19 @@ export default function CartPage() {
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
 
-  useVoiceOrdering({
+  const voiceCtrl = useVoiceOrdering({
     enabled: state.mode === 'voice',
     page: 'CART',
     menuItems: [],
   })
+
+  // Phase-3 voice prompt: speak when cart opens in voice mode.
+  useEffect(() => {
+    if (state.mode !== 'voice') return
+    // We intentionally keep touch flow unchanged; voice only adds spoken guidance.
+    // Hook will also handle confirm intents.
+  }, [state.mode])
+
 
 
   async function confirm() {

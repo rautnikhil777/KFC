@@ -52,12 +52,23 @@ export default function MenuPage() {
 
   const copy = useMemo(() => COPY[state.language] || COPY.en, [state.language])
 
-  useVoiceOrdering({
+  const voiceCtrl = useVoiceOrdering({
     enabled: state.mode === 'voice',
     page: 'MENU',
     menuItems: menu ? (menu || []).flatMap((c) => c.items || []) : [],
     onCartUpdated: null,
   })
+
+  useEffect(() => {
+    if (state.mode !== 'voice') return
+    if (!voiceCtrl?.setOnSelectCategory) return
+
+    voiceCtrl.setOnSelectCategory((categoryKey) => {
+      // Map spoken category to MenuPage activeKey (menu keys are already those strings per requirement)
+      setActiveKey(categoryKey)
+    })
+  }, [state.mode, voiceCtrl])
+
 
 
 
