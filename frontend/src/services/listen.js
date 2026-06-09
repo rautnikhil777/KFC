@@ -1,292 +1,222 @@
-const recognitionRef = { current: null }
-const isListeningRef = { current: false }
-const isRestartingRef = { current: false }
-let pendingStartConfig = null
+/**
+ * listen.js — Pure SpeechRecognition service.
+ *
+ * Design contract:
+ *  - ONE singleton SpeechRecognition instance (never recreated, only started/stopped)
+ *  - NO auto-restart on 'onend'. The hook (useVoiceOrdering) owns restart scheduling.
+ *  - All callbacks are supplied per startListening() call.
+ *  - Barge-in: onBargeIn fires the instant user speech begins (onspeechstart).
+ *  - Double-fire prevention: if native isFinal fires, silence-timer is cancelled.
+ *  - 'no-speech' and 'aborted' errors are silently swallowed (normal on mobile).
+ */
 
-let listening = false
+let recognition = null
+let isActive = false        // true between .start() and onend
 let stoppedManually = false
-let onResultCb = null
-let onErrorCb = null
-let onSpeechStartCb = null
 
+// Per-session callbacks — replaced on each startListening() call
+let onResultCb  = null
+let onErrorCb   = null
+let onEndCb     = null   // called with { manual: bool } — hook decides whether to restart
+let onBargeInCb = null   // called the instant user speech is detected
+
+// Dedup / silence state
 let silenceTimer = null
-let silenceMs = 900
-let lastProcessedIndex = 0
-let speechStarted = false
+let lastIndex    = 0
+let lastFinalTranscript = ''
 
-// Registry for speak callbacks to avoid circular dependencies
-let speakCallbacks = {
-  isSpeaking: () => false,
-  stopSpeak: () => {},
-  setVoiceState: () => {},
-}
+// ─── Platform detection (computed once at module load) ──────────────────────
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(
+  typeof navigator !== 'undefined' ? navigator.userAgent : ''
+)
+const SILENCE_MS = IS_MOBILE ? 1500 : 1000
 
-export function setSpeakCallbacks({ isSpeaking, stopSpeak, setVoiceState }) {
-  if (typeof isSpeaking === 'function') speakCallbacks.isSpeaking = isSpeaking
-  if (typeof stopSpeak === 'function') speakCallbacks.stopSpeak = stopSpeak
-  if (typeof setVoiceState === 'function') speakCallbacks.setVoiceState = setVoiceState
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getRecognitionCtor() {
+function getCtor() {
   if (typeof window === 'undefined') return null
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
 }
 
-function getActiveTranscript(results, startIndex) {
-  let transcript = ''
-  let hasFinal = false
-  let bestConfidence = 0
-
-  for (let i = startIndex; i < results.length; i++) {
-    const res = results[i]
-    if (res && res[0]) {
-      transcript += res[0].transcript + ' '
-      if (res.isFinal) {
-        hasFinal = true
-      }
-      const conf = typeof res[0].confidence === 'number' ? res[0].confidence : 0
-      if (conf > bestConfidence) {
-        bestConfidence = conf
-      }
-    }
+function clearSilenceTimer() {
+  if (silenceTimer !== null) {
+    clearTimeout(silenceTimer)
+    silenceTimer = null
   }
-  return { transcript: transcript.trim(), hasFinal, confidence: bestConfidence }
 }
 
-function createRecognition() {
-  const Ctor = getRecognitionCtor()
+// ─── Instance factory ───────────────────────────────────────────────────────
+
+function buildInstance(lang) {
+  const Ctor = getCtor()
   if (!Ctor) return null
 
   const r = new Ctor()
-  r.continuous = true
-  r.interimResults = true
-  r.lang = 'en-US'
+  r.continuous      = true
+  r.interimResults  = true
+  r.lang            = lang || 'en-US'
+  r.maxAlternatives = 1
 
+  // ── Barge-in: fires the moment user voice is detected ────────────────────
   r.onspeechstart = () => {
-    // Barge-in: if currently speaking, stop it immediately
-    if (speakCallbacks.isSpeaking()) {
-      speakCallbacks.stopSpeak()
-      speakCallbacks.setVoiceState('listening')
-    }
-    if (onSpeechStartCb && !speechStarted) {
-      speechStarted = true
-      onSpeechStartCb()
-    }
+    if (onBargeInCb) onBargeInCb()
   }
 
+  // ── Results ──────────────────────────────────────────────────────────────
   r.onresult = (event) => {
-    // Barge-in check: user started speaking
-    if (speakCallbacks.isSpeaking()) {
-      speakCallbacks.stopSpeak()
-      speakCallbacks.setVoiceState('listening')
+    if (!onResultCb) return
+
+    let transcript = ''
+    let hasFinal   = false
+
+    for (let i = lastIndex; i < event.results.length; i++) {
+      const res = event.results[i]
+      if (res?.[0]) {
+        transcript += res[0].transcript
+        if (res.isFinal) hasFinal = true
+      }
     }
 
-    if (onSpeechStartCb && !speechStarted) {
-      speechStarted = true
-      onSpeechStartCb()
-    }
-
-    const { transcript, hasFinal, confidence } = getActiveTranscript(event.results, lastProcessedIndex)
+    transcript = transcript.trim()
     if (!transcript) return
 
-    if (onResultCb) {
-      onResultCb({ transcript, confidence, isFinal: false })
-    }
-
-    if (silenceTimer) clearTimeout(silenceTimer)
-    silenceTimer = setTimeout(() => {
-      if (onResultCb && transcript) {
-        onResultCb({ transcript, confidence, isFinal: true })
-      }
-      lastProcessedIndex = event.results.length
-      speechStarted = false
-      if (silenceTimer) {
-        clearTimeout(silenceTimer)
-        silenceTimer = null
-      }
-    }, silenceMs)
+    // Always fire interim so the UI can show "processing..." feedback
+    onResultCb({ transcript, isFinal: false })
 
     if (hasFinal) {
-      if (silenceTimer) {
-        clearTimeout(silenceTimer)
-        silenceTimer = null
+      // Native final result: fire immediately, cancel any pending silence timer
+      clearSilenceTimer()
+      lastIndex = event.results.length
+      if (transcript !== lastFinalTranscript) {
+        lastFinalTranscript = transcript
+        onResultCb({ transcript, isFinal: true })
       }
-      if (onResultCb && transcript) {
-        onResultCb({ transcript, confidence, isFinal: true })
-      }
-      lastProcessedIndex = event.results.length
-      speechStarted = false
+      return
     }
+
+    // No native final yet: (re)set silence timer
+    clearSilenceTimer()
+    const capturedTranscript = transcript
+    const capturedIndex      = event.results.length
+    silenceTimer = setTimeout(() => {
+      silenceTimer = null
+      lastIndex    = capturedIndex
+      if (capturedTranscript !== lastFinalTranscript) {
+        lastFinalTranscript = capturedTranscript
+        onResultCb({ transcript: capturedTranscript, isFinal: true })
+      }
+    }, SILENCE_MS)
   }
 
+  // ── Errors ───────────────────────────────────────────────────────────────
   r.onerror = (e) => {
+    // 'no-speech' and 'aborted' are normal on mobile — swallow silently
+    if (e.error === 'no-speech' || e.error === 'aborted') return
     if (onErrorCb) onErrorCb(e)
   }
 
+  // ── End ───────────────────────────────────────────────────────────────────
+  // NOTE: We do NOT auto-restart here. The hook decides all restart logic.
   r.onend = () => {
-    isListeningRef.current = false
-    listening = false
-    speechStarted = false
-    if (silenceTimer) {
-      clearTimeout(silenceTimer)
-      silenceTimer = null
-    }
-
-    // Process pending start request if queued
-    if (pendingStartConfig) {
-      const config = pendingStartConfig
-      pendingStartConfig = null
-      try {
-        startListening(config)
-      } catch (e) {
-        console.error('Failed to start pending listening:', e)
-      }
-      return
-    }
-
-    if (stoppedManually) {
-      isRestartingRef.current = false
-      return
-    }
-
-    if (isRestartingRef.current) {
-      return
-    }
-
-    // Do not restart if TTS is active
-    if (speakCallbacks.isSpeaking()) {
-      return
-    }
-
-    const isMobile = /Android|iPhone|iPad/i.test(typeof navigator !== 'undefined' ? navigator.userAgent : '')
-    const restartDelay = isMobile ? 1800 : 1200
-
-    isRestartingRef.current = true
-
-    setTimeout(() => {
-      isRestartingRef.current = false
-      if (stoppedManually || pendingStartConfig) return
-      if (speakCallbacks.isSpeaking()) return
-      if (isListeningRef.current) return
-
-      try {
-        startListening({
-          lang: recognitionRef.current?.lang || 'en-US',
-          silenceMs,
-          onSpeechStart: onSpeechStartCb,
-          onResult: onResultCb,
-          onError: onErrorCb
-        })
-      } catch (e) {
-        console.error('Failed to restart listening:', e)
-      }
-    }, restartDelay)
+    const wasManual = stoppedManually
+    isActive        = false
+    stoppedManually = false
+    clearSilenceTimer()
+    if (onEndCb) onEndCb({ manual: wasManual })
   }
 
   return r
 }
 
-export function startListening({ lang, silenceMs: customSilenceMs, onSpeechStart, onResult, onError } = {}) {
-  const Ctor = getRecognitionCtor()
-  if (!Ctor) {
-    throw new Error('SpeechRecognition is not supported in this browser.')
-  }
+// ─── Public API ─────────────────────────────────────────────────────────────
 
-  // Queue if already running or restarting to ensure singleton execution
-  if (isListeningRef.current || isRestartingRef.current) {
-    pendingStartConfig = { lang, silenceMs: customSilenceMs, onSpeechStart, onResult, onError }
-    stopListening()
-    return {
-      stop: stopListening,
-    }
-  }
+/**
+ * Start listening.
+ *
+ * @param {object}   opts
+ * @param {string}   opts.lang       BCP-47 tag e.g. 'en-US', 'hi-IN'
+ * @param {function} opts.onResult   Called with { transcript, isFinal }
+ * @param {function} opts.onError    Called on non-trivial recognition errors
+ * @param {function} opts.onEnd      Called when recognition ends — { manual: bool }
+ * @param {function} opts.onBargeIn  Called the instant user speech starts (for TTS interrupt)
+ */
+export function startListening({
+  lang      = 'en-US',
+  onResult,
+  onError,
+  onEnd,
+  onBargeIn,
+} = {}) {
+  if (!getCtor()) throw new Error('SpeechRecognition is not supported in this browser.')
+  if (isActive) return // Already running — guard against double-start
 
-  onResultCb = typeof onResult === 'function' ? onResult : null
-  onErrorCb = typeof onError === 'function' ? onError : null
-  onSpeechStartCb = typeof onSpeechStart === 'function' ? onSpeechStart : null
+  onResultCb  = typeof onResult  === 'function' ? onResult  : null
+  onErrorCb   = typeof onError   === 'function' ? onError   : null
+  onEndCb     = typeof onEnd     === 'function' ? onEnd     : null
+  onBargeInCb = typeof onBargeIn === 'function' ? onBargeIn : null
 
-  const isMobile = /Android|iPhone|iPad/i.test(typeof navigator !== 'undefined' ? navigator.userAgent : '')
-  if (customSilenceMs) {
-    silenceMs = customSilenceMs
+  stoppedManually     = false
+  lastIndex           = 0
+  lastFinalTranscript = ''
+  clearSilenceTimer()
+
+  if (!recognition) {
+    recognition = buildInstance(lang)
   } else {
-    silenceMs = isMobile ? 1200 : 900
+    // Reuse existing instance — just update lang
+    recognition.lang = lang
   }
 
-  stoppedManually = false
-
-  if (!recognitionRef.current) {
-    recognitionRef.current = createRecognition()
-  }
-  if (!recognitionRef.current) throw new Error('Failed to initialize SpeechRecognition')
-
-  recognitionRef.current.lang = lang || recognitionRef.current.lang || 'en-US'
-  lastProcessedIndex = 0
-  speechStarted = false
-
-  if (silenceTimer) {
-    clearTimeout(silenceTimer)
-    silenceTimer = null
-  }
+  if (!recognition) throw new Error('Failed to initialize SpeechRecognition.')
 
   try {
-    isListeningRef.current = true
-    listening = true
-    recognitionRef.current.start()
-    speakCallbacks.setVoiceState('listening')
+    isActive = true
+    recognition.start()
   } catch (e) {
-    // Treat start called twice as non-fatal
-    isListeningRef.current = true
-    listening = true
-  }
-
-  return {
-    stop: stopListening,
+    if (e.name === 'InvalidStateError') {
+      // Already started — treat as active (happens on mobile occasionally)
+      isActive = true
+    } else {
+      isActive = false
+      throw e
+    }
   }
 }
 
+/**
+ * Stop listening (manual stop — onEnd will fire with manual: true).
+ */
 export function stopListening() {
   stoppedManually = true
-  pendingStartConfig = null
-  isListeningRef.current = false
-  listening = false
-  speechStarted = false
-  if (silenceTimer) {
-    clearTimeout(silenceTimer)
-    silenceTimer = null
-  }
-  try {
-    recognitionRef.current?.stop()
-  } catch (e) {
-    // ignore
-  }
-  speakCallbacks.setVoiceState('idle')
+  clearSilenceTimer()
+  isActive = false
+  try { recognition?.stop() } catch (_) {}
 }
 
+/**
+ * Returns true if recognition is currently active.
+ */
 export function isListening() {
-  return isListeningRef.current || listening
+  return isActive
 }
 
-export function cleanupListener() {
+/**
+ * Full teardown — destroys the singleton instance.
+ * Call on component unmount so the next mount starts fresh.
+ */
+export function destroyListener() {
   stoppedManually = true
-  pendingStartConfig = null
-  isListeningRef.current = false
-  listening = false
-  speechStarted = false
-  if (silenceTimer) {
-    clearTimeout(silenceTimer)
-    silenceTimer = null
+  isActive        = false
+  clearSilenceTimer()
+  if (recognition) {
+    try { recognition.stop() } catch (_) {}
+    recognition.onspeechstart = null
+    recognition.onresult      = null
+    recognition.onerror       = null
+    recognition.onend         = null
+    recognition = null
   }
-  if (recognitionRef.current) {
-    try {
-      recognitionRef.current.stop()
-    } catch (e) {
-      // ignore
-    }
-    recognitionRef.current.onspeechstart = null
-    recognitionRef.current.onresult = null
-    recognitionRef.current.onerror = null
-    recognitionRef.current.onend = null
-    recognitionRef.current = null
-  }
-  speakCallbacks.setVoiceState('idle')
+  onResultCb = onErrorCb = onEndCb = onBargeInCb = null
+  lastFinalTranscript = ''
+  lastIndex = 0
 }

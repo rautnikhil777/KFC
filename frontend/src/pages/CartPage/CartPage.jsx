@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from 'react'
+import { useContext, useMemo, useState } from 'react'
 
 import { useNavigate } from 'react-router-dom'
 import CartSummary from '../../components/CartSummary/CartSummary.jsx'
@@ -6,7 +6,6 @@ import TopBar from '../../components/TopBar/TopBar.jsx'
 import { OrderSessionContext } from '../../context/OrderSessionContext.jsx'
 import { useVoiceOrdering } from '../../hooks/useVoiceOrdering.js'
 import { apiConfirmOrder } from '../../services/api.js'
-import { speak } from '../../services/speak.js'
 import styles from './cartPage.module.css'
 
 
@@ -23,7 +22,6 @@ const COPY = {
     remove: 'Remove',
     confirm: 'Confirm & Send to Kitchen',
     back: 'Back to Menu',
-    confirmVoice: 'Voice confirmation (Phase 1 simulated)',
   },
   hi: {
     title: 'कार्ट',
@@ -34,7 +32,6 @@ const COPY = {
     remove: 'हटाएं',
     confirm: 'कन्फर्म करें और किचन भेजें',
     back: 'मेनू पर वापस',
-    confirmVoice: 'वॉइस कन्फर्मेशन (Phase 1 सिम्युलेटेड)',
   },
   mr: {
     title: 'कार्ट',
@@ -45,7 +42,6 @@ const COPY = {
     remove: 'काढा',
     confirm: 'कन्फर्म करा आणि किचनला पाठवा',
     back: 'मेनूला परत',
-    confirmVoice: 'Voice confirmation (Phase 1 simulated)',
   },
 }
 
@@ -85,12 +81,6 @@ export default function CartPage() {
 
       setConfirming(true)
 
-      // Phase 1: simulated voice confirmation prompt
-      const ok = window.confirm(
-        `${copy.confirmVoice}\n\nTotal items: ${state.cart.items.reduce((a, x) => a + (x.quantity || 0), 0)}\nProceed?`
-      )
-      if (!ok) return
-
       const payload = await apiConfirmOrder({
         sessionId: state.sessionId,
         cartItems: state.cart.items,
@@ -100,7 +90,6 @@ export default function CartPage() {
       setCart({ items: [] })
 
       nav(`/kitchen`)
-      // Kitchen list refresh happens there.
       return payload
     } catch (e) {
       alert(e?.message || 'Failed to confirm order')

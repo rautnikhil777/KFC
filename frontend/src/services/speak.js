@@ -1,139 +1,104 @@
+/**
+ * speak.js — Pure Text-to-Speech service.
+ *
+ * Design contract:
+ *  - No queue (hook sequences speech explicitly via speakThen pattern)
+ *  - No voice-state management (hook owns all state)
+ *  - speak(text, lang, onEnd) is the one public API
+ *  - stopSpeak() cancels current utterance silently (no callback fires)
+ *  - isSpeaking() reflects live TTS flag
+ */
+
 const LANG_MAP = {
   en: 'en-US',
   hi: 'hi-IN',
   mr: 'mr-IN',
 }
 
-let currentUtterance = null
-let speaking = false
-let queue = []
-let speakStateListener = null
+let _speaking         = false
+let _currentUtterance = null
 
-export let voiceState = 'idle' // 'idle' | 'listening' | 'speaking' | 'processing'
+// ─── Public API ─────────────────────────────────────────────────────────────
 
-// Registry for listen callbacks to avoid circular dependencies
-let listenCallbacks = {
-  isListening: () => false,
-  stopListening: () => {},
-}
-
-export function setListenCallbacks({ isListening, stopListening }) {
-  if (typeof isListening === 'function') listenCallbacks.isListening = isListening
-  if (typeof stopListening === 'function') listenCallbacks.stopListening = stopListening
-}
-
-export function setVoiceState(state) {
-  const allowed = ['idle', 'listening', 'speaking', 'processing']
-  if (allowed.includes(state)) {
-    voiceState = state
-    notifyState(state.toUpperCase())
-
-    // Mutex rule: if state transitioned to idle, process any queued speech
-    if (state === 'idle') {
-      const next = queue.shift()
-      if (next) {
-        // Stop listening before speaking
-        listenCallbacks.stopListening()
-        speakOne(next.text, next.lang)
-      }
-    }
-  }
-}
-
-export function getVoiceState() {
-  return voiceState
-}
-
-export function setSpeakStateListener(cb) {
-  speakStateListener = cb
-}
-
+/**
+ * Returns true if TTS is currently active.
+ */
 export function isSpeaking() {
-  return speaking
+  return _speaking
 }
 
-function notifyState(state) {
-  if (speakStateListener) {
-    try {
-      speakStateListener(state)
-    } catch (e) {
-      console.error('Error in speakStateListener:', e)
-    }
-  }
-}
-
+/**
+ * Cancel any current utterance immediately.
+ * Does NOT fire the onEnd callback — caller handles state transitions.
+ */
 export function stopSpeak() {
-  if (!window.speechSynthesis) return
+  if (!window?.speechSynthesis) return
   window.speechSynthesis.cancel()
-  currentUtterance = null
-  speaking = false
-  queue = []
-  setVoiceState('idle')
+  _speaking         = false
+  _currentUtterance = null
 }
 
-function speakOne(text, lang) {
-  if (!window.speechSynthesis) return false
-
-  const utterance = new SpeechSynthesisUtterance(text)
-  const targetLang = LANG_MAP[lang] || LANG_MAP.en
-
-  utterance.lang = targetLang
-  const voices = window.speechSynthesis.getVoices() || []
-  if (voices.length > 0) {
-    const wanted = targetLang.toLowerCase()
-    const byLang = voices.find((v) => (v.lang || '').toLowerCase() === wanted)
-    if (byLang) {
-      utterance.voice = byLang
-    } else {
-      const prefix = wanted.split('-')[0]
-      const fallback = voices.find((v) => (v.lang || '').toLowerCase().startsWith(prefix))
-      if (fallback) utterance.voice = fallback
-    }
-  }
-
-  utterance.onstart = () => {
-    speaking = true
-    currentUtterance = utterance
-    setVoiceState('speaking')
-  }
-
-  utterance.onend = () => {
-    speaking = false
-    currentUtterance = null
-    setVoiceState('idle')
-  }
-
-  utterance.onerror = () => {
-    speaking = false
-    currentUtterance = null
-    setVoiceState('idle')
-  }
-
-  window.speechSynthesis.speak(utterance)
-  return true
-}
-
-export function queueSpeech(text, lang) {
-  const clean = String(text || '').trim()
-  if (!clean) return
-
-  if (!window.speechSynthesis) return
-
-  // Mutex rule: If currently speaking or listening is active, queue it
-  if (speaking || listenCallbacks.isListening()) {
-    queue.push({ text: clean, lang })
+/**
+ * Speak text, then call onEnd when done.
+ * Cancels any currently playing utterance first (no queue — caller sequences).
+ *
+ * @param {string}   text   Text to speak
+ * @param {string}   lang   'en' | 'hi' | 'mr'
+ * @param {function} onEnd  Called when utterance finishes (success, error, or replaced)
+ */
+export function speak(text, lang, onEnd) {
+  if (!window?.speechSynthesis) {
+    if (typeof onEnd === 'function') onEnd()
     return
   }
 
-  queue = []
-  // Mutex rule: If speaking = true -> listening MUST stop
-  listenCallbacks.stopListening()
-  speakOne(clean, lang)
-}
+  // Cancel previous utterance — its onend will NOT fire after .cancel()
+  window.speechSynthesis.cancel()
+  _speaking         = false
+  _currentUtterance = null
 
-export function speak(text, lang) {
-  // Ensure listening stops immediately before starting new speech
-  listenCallbacks.stopListening()
-  stopSpeak()
-  queueSpeech(text, lang)
+  const clean = String(text || '').trim()
+  if (!clean) {
+    if (typeof onEnd === 'function') onEnd()
+    return
+  }
+
+  const utterance  = new SpeechSynthesisUtterance(clean)
+  utterance.lang   = LANG_MAP[lang] || LANG_MAP.en
+  utterance.rate   = 1.0
+  utterance.pitch  = 1.0
+
+  // ── Voice selection ───────────────────────────────────────────────────────
+  const voices = window.speechSynthesis.getVoices() || []
+  if (voices.length > 0) {
+    const target  = utterance.lang.toLowerCase()
+    const exact   = voices.find(v => (v.lang || '').toLowerCase() === target)
+    if (exact) {
+      utterance.voice = exact
+    } else {
+      const prefix  = target.split('-')[0]
+      const partial = voices.find(v => (v.lang || '').toLowerCase().startsWith(prefix))
+      if (partial) utterance.voice = partial
+    }
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  utterance.onstart = () => {
+    _speaking         = true
+    _currentUtterance = utterance
+  }
+
+  const endHandler = () => {
+    // Only update state if this utterance is still the active one
+    if (_currentUtterance === utterance) {
+      _speaking         = false
+      _currentUtterance = null
+    }
+    if (typeof onEnd === 'function') onEnd()
+  }
+
+  utterance.onend   = endHandler
+  utterance.onerror = endHandler
+
+  window.speechSynthesis.speak(utterance)
 }
