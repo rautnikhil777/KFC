@@ -9,6 +9,41 @@ let speaking = false
 let queue = []
 let speakStateListener = null
 
+export let voiceState = 'idle' // 'idle' | 'listening' | 'speaking' | 'processing'
+
+// Registry for listen callbacks to avoid circular dependencies
+let listenCallbacks = {
+  isListening: () => false,
+  stopListening: () => {},
+}
+
+export function setListenCallbacks({ isListening, stopListening }) {
+  if (typeof isListening === 'function') listenCallbacks.isListening = isListening
+  if (typeof stopListening === 'function') listenCallbacks.stopListening = stopListening
+}
+
+export function setVoiceState(state) {
+  const allowed = ['idle', 'listening', 'speaking', 'processing']
+  if (allowed.includes(state)) {
+    voiceState = state
+    notifyState(state.toUpperCase())
+
+    // Mutex rule: if state transitioned to idle, process any queued speech
+    if (state === 'idle') {
+      const next = queue.shift()
+      if (next) {
+        // Stop listening before speaking
+        listenCallbacks.stopListening()
+        speakOne(next.text, next.lang)
+      }
+    }
+  }
+}
+
+export function getVoiceState() {
+  return voiceState
+}
+
 export function setSpeakStateListener(cb) {
   speakStateListener = cb
 }
@@ -33,7 +68,7 @@ export function stopSpeak() {
   currentUtterance = null
   speaking = false
   queue = []
-  notifyState('IDLE')
+  setVoiceState('idle')
 }
 
 function speakOne(text, lang) {
@@ -59,24 +94,19 @@ function speakOne(text, lang) {
   utterance.onstart = () => {
     speaking = true
     currentUtterance = utterance
-    notifyState('SPEAKING')
+    setVoiceState('speaking')
   }
 
   utterance.onend = () => {
     speaking = false
     currentUtterance = null
-    notifyState('IDLE')
-    // dequeue next
-    const next = queue.shift()
-    if (next) speakOne(next.text, next.lang)
+    setVoiceState('idle')
   }
 
   utterance.onerror = () => {
     speaking = false
     currentUtterance = null
-    notifyState('IDLE')
-    const next = queue.shift()
-    if (next) speakOne(next.text, next.lang)
+    setVoiceState('idle')
   }
 
   window.speechSynthesis.speak(utterance)
@@ -89,18 +119,21 @@ export function queueSpeech(text, lang) {
 
   if (!window.speechSynthesis) return
 
-  // If currently speaking, append to queue
-  if (speaking) {
+  // Mutex rule: If currently speaking or listening is active, queue it
+  if (speaking || listenCallbacks.isListening()) {
     queue.push({ text: clean, lang })
     return
   }
 
-  // If not speaking, speak immediately
   queue = []
+  // Mutex rule: If speaking = true -> listening MUST stop
+  listenCallbacks.stopListening()
   speakOne(clean, lang)
 }
 
 export function speak(text, lang) {
+  // Ensure listening stops immediately before starting new speech
+  listenCallbacks.stopListening()
   stopSpeak()
   queueSpeech(text, lang)
 }

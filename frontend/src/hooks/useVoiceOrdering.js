@@ -10,8 +10,12 @@ import {
   isRepeatLastIntent,
   parseVoice,
 } from '../services/intentParser.js'
-import { isListening, startListening, stopListening } from '../services/listen.js'
-import { isSpeaking, setSpeakStateListener, speak, stopSpeak } from '../services/speak.js'
+import { isListening, startListening, stopListening, cleanupListener, setSpeakCallbacks } from '../services/listen.js'
+import { isSpeaking, setSpeakStateListener, speak, stopSpeak, setListenCallbacks, setVoiceState } from '../services/speak.js'
+
+// Register callbacks for services to communicate dynamically without circular imports
+setSpeakCallbacks({ isSpeaking, stopSpeak, setVoiceState })
+setListenCallbacks({ isListening, stopListening })
 
 function safeLang(stateLang) {
   if (stateLang === 'hi' || stateLang === 'mr' || stateLang === 'en') return stateLang
@@ -79,7 +83,7 @@ const COPY = {
     emptCart:        'कार्ट रिकामे आहे.',
     noRepeat:        'मागील आयटम सापडला नाही.',
     notFound:        'तो आयटम सापडला नाही.',
-    cartGreeting:    'सर, हे आपले निवडलेले आयटम आहेत. कृपया तपासा आणि ऑर्डर कन्फर्म करा.',
+    cartGreeting:    'सर, हे आपले निवडलेले आयटम आहेत. कृपया तपासा आणि ORDER कन्फर्म करा.',
     cartEmpty:       'सर, कार्ट रिकामे आहे.',
     switching:       (label) => `ठीक आहे सर, ${label} दाखवत आहे.`,
     opening:         (label) => `सर, सध्या ${label} दाखवत आहे.`,
@@ -110,6 +114,8 @@ export function useVoiceOrdering({
 
   const listeningRef             = useRef(false)
   const lastHandledTranscriptRef = useRef('')
+  const lastProcessedTranscriptRef = useRef('')
+  const handleTranscriptDebounceRef = useRef(null)
 
   const stepRef        = useRef('IDLE') // MENU_ENTRY | CATEGORY_SELECTION | ITEM_SELECTION | WAITING_FOR_QTY | ANYTHING_ELSE | CART_CONFIRM | KITCHEN | PAYMENT
   const commandLockRef = useRef(false)
@@ -136,7 +142,7 @@ export function useVoiceOrdering({
 
   function speakNow(text, l = lang) {
     stopSpeak()
-    setVoiceStatus('SPEAKING')
+    setVoiceState('speaking')
     speak(text, l)
   }
 
@@ -225,22 +231,37 @@ export function useVoiceOrdering({
       return
     }
 
+    const norm = String(rawTranscript).trim().toLowerCase()
+    if (!norm) return
+
+    // Ignore duplicate transcripts
+    if (norm === lastProcessedTranscriptRef.current) {
+      return
+    }
+
+    if (handleTranscriptDebounceRef.current) {
+      clearTimeout(handleTranscriptDebounceRef.current)
+    }
+
+    handleTranscriptDebounceRef.current = setTimeout(() => {
+      lastProcessedTranscriptRef.current = norm
+      processTranscriptActual(rawTranscript)
+    }, 500)
+  }
+
+  function processTranscriptActual(rawTranscript) {
     if (commandLockRef.current) return
     commandLockRef.current = true
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       commandLockRef.current = false
-      setVoiceStatus(isListening() ? 'LISTENING' : 'IDLE')
+      setVoiceState(isListening() ? 'listening' : 'idle')
     }, 450)
 
     if (!enabled) return
     if (!rawTranscript) return
 
     const norm = String(rawTranscript).trim().toLowerCase()
-    if (!norm) return
-    if (norm === lastHandledTranscriptRef.current) return
-    lastHandledTranscriptRef.current = norm
-
     const lower = norm
     const step  = stepRef.current
 
@@ -422,7 +443,8 @@ export function useVoiceOrdering({
     listeningRef.current = false
     clearSilenceTimers()
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    setVoiceStatus('IDLE')
+    if (handleTranscriptDebounceRef.current) clearTimeout(handleTranscriptDebounceRef.current)
+    setVoiceState('idle')
   }
 
   useEffect(() => {
@@ -431,7 +453,7 @@ export function useVoiceOrdering({
       return
     }
     if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) return
-    if (listeningRef.current) return
+    if (isListening()) return
 
     try {
       startListening({
@@ -440,14 +462,14 @@ export function useVoiceOrdering({
         onSpeechStart: () => {
           if (isSpeaking()) {
             stopSpeak()
-            setVoiceStatus('LISTENING')
+            setVoiceState('listening')
           }
         },
         onResult: (res) => {
           const transcript = res?.transcript
           if (!transcript) return
           if (!res.isFinal) {
-            setVoiceStatus('PROCESSING')
+            setVoiceState('processing')
           } else {
             handleTranscript(transcript)
           }
@@ -455,7 +477,7 @@ export function useVoiceOrdering({
         onError: () => {},
       })
       listeningRef.current = true
-      setVoiceStatus('LISTENING')
+      setVoiceState('listening')
     } catch (e) {
       console.error(e)
     }
@@ -466,11 +488,7 @@ export function useVoiceOrdering({
   useEffect(() => {
     if (!enabled) return
     setSpeakStateListener((speakState) => {
-      if (speakState === 'SPEAKING') {
-        setVoiceStatus('SPEAKING')
-      } else {
-        setVoiceStatus(isListening() ? 'LISTENING' : 'IDLE')
-      }
+      setVoiceStatus(speakState)
     })
     return () => setSpeakStateListener(null)
   }, [enabled])
@@ -492,8 +510,21 @@ export function useVoiceOrdering({
 
   useEffect(() => {
     return () => {
-      stopAll()
+      stopSpeak()
+      cleanupListener()
+      listeningRef.current = false
+      clearSilenceTimers()
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (handleTranscriptDebounceRef.current) clearTimeout(handleTranscriptDebounceRef.current)
       setSpeakStateListener(null)
+      
+      // Reset all refs
+      lastProcessedTranscriptRef.current = ''
+      lastHandledTranscriptRef.current = ''
+      currentVoiceCategoryRef.current = null
+      lastAddedItemRef.current = null
+      pendingItemRef.current = null
+      pendingQtyRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
