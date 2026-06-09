@@ -19,23 +19,34 @@ function normalize(s) {
   return text
 }
 
-function extractQuantity(text) {
+const WORD_TO_NUM = {
+  one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+}
+
+export function extractQuantity(text) {
   const t = normalize(text)
 
-  // digits: 2, 2x, 2 x …
-  const digit = t.match(/(\d+)\s*(x|times)?\b/)
-  if (digit) return Number(digit[1])
+  const words = t.split(' ')
 
-  // spoken number words
-  const words = {
-    one: 1, two: 2, three: 3, four: 4, five: 5,
-    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-  }
-  for (const [w, n] of Object.entries(words)) {
-    if (t.split(' ').includes(w)) return n
+  let foundNumber = null
+
+  for (const w of words) {
+    if (WORD_TO_NUM[w] !== undefined) {
+      foundNumber = WORD_TO_NUM[w]
+      break
+    }
+
+    const num = Number(w)
+    if (!isNaN(num)) {
+      foundNumber = num
+      break
+    }
   }
 
-  return null
+  if (foundNumber === null) return null
+
+  return Math.min(Math.max(foundNumber, 1), 10)
 }
 
 function stripNumbers(text) {
@@ -89,30 +100,30 @@ function stemWord(word) {
 // ─── Category synonym table ────────────────────────────────────────────────
 
 const CATEGORY_SYNONYMS = {
-  starter:          'starter',
-  starters:         'starter',
-  snacks:           'starter',
-  appetizer:        'starter',
+  starter: 'starter',
+  starters: 'starter',
+  snacks: 'starter',
+  appetizer: 'starter',
 
-  main:             'main',
-  'main course':    'main',
-  maincourse:       'main',
-  meal:             'main',
-  food:             'main',
-  lunch:            'main',
-  dinner:           'main',
+  main: 'main',
+  'main course': 'main',
+  maincourse: 'main',
+  meal: 'main',
+  food: 'main',
+  lunch: 'main',
+  dinner: 'main',
 
-  drink:            'drinks',
-  drinks:           'drinks',
-  beverage:         'drinks',
-  'cold drink':     'drinks',
-  juice:            'drinks',
+  drink: 'drinks',
+  drinks: 'drinks',
+  beverage: 'drinks',
+  'cold drink': 'drinks',
+  juice: 'drinks',
 
-  dessert:          'dessert',
-  desserts:         'dessert',
-  sweet:            'dessert',
-  sweets:           'dessert',
-  'ice cream':      'dessert',
+  dessert: 'dessert',
+  desserts: 'dessert',
+  sweet: 'dessert',
+  sweets: 'dessert',
+  'ice cream': 'dessert',
 }
 
 const ITEM_ALIASES = {
@@ -157,10 +168,10 @@ export function detectCategoryIntent(raw) {
 }
 
 export const CATEGORY_DISPLAY_NAMES = {
-  starter:  'Starters',
-  main:     'Main Course',
-  drinks:   'Drinks',
-  dessert:  'Dessert',
+  starter: 'Starters',
+  main: 'Main Course',
+  drinks: 'Drinks',
+  dessert: 'Dessert',
 }
 
 function bestMatchMenuItem(spoken, menuItems) {
