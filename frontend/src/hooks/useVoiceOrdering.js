@@ -41,6 +41,9 @@ const COPY = {
     opening:         (label) => `Sir, currently showing ${label}. You may order items or switch category.`,
     whatOrder:       'What would you like to order?',
     recovery:        'Sir, I did not understand. You may choose starters, main course, drinks or dessert.',
+    confidenceLow:   'Sorry sir, I did not understand.',
+    categoryUnclear: 'Would you like starters, main course, drinks or dessert?',
+    itemUnclear:     'Please tell item name again.',
   },
   hi: {
     anythingElse:    'कुछ और चाहिए सर?',
@@ -60,6 +63,9 @@ const COPY = {
     opening:         (label) => `सर, अभी ${label} दिखाया जा रहा है।`,
     whatOrder:       'आप क्या ऑर्डर करना चाहेंगे?',
     recovery:        'सर, समझ नहीं आया। कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट चुनें।',
+    confidenceLow:   'माफ़ कीजिये सर, मुझे समझ नहीं आया।',
+    categoryUnclear: 'क्या आप स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट लेना चाहेंगे?',
+    itemUnclear:     'कृपया आइटम का नाम फिर से बताएं।',
   },
   mr: {
     anythingElse:    'काही अजून सर?',
@@ -79,6 +85,9 @@ const COPY = {
     opening:         (label) => `सर, सध्या ${label} दाखवत आहे.`,
     whatOrder:       'आपण काय ऑर्डर करणार आहात?',
     recovery:        'सर, समजलं नाही. कृपया स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट निवडा.',
+    confidenceLow:   'माफ करा सर, मला समजले नाही.',
+    categoryUnclear: 'तुम्हाला स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट हवे आहे का?',
+    itemUnclear:     'कृपया आयटमचे नाव पुन्हा सांगा.',
   },
 }
 
@@ -152,7 +161,7 @@ export function useVoiceOrdering({
       if (!cat) return false
       if (cat === k) return true
       if (cat.includes(k) || k.includes(cat)) return true
-      if ((k === 'mains' || k === 'main course') && cat.includes('main')) return true
+      if ((k === 'mains' || k === 'main course' || k === 'main') && cat.includes('main')) return true
       if (k === 'starter'  && (cat.includes('starter') || cat.includes('start')))    return true
       if (k === 'drinks'   && (cat.includes('drink')   || cat.includes('beverage'))) return true
       if (k === 'dessert'  && (cat.includes('dessert')  || cat.includes('sweet')))   return true
@@ -174,11 +183,13 @@ export function useVoiceOrdering({
     const first5   = catItems.slice(0, 5)
     const names    = first5.map((it) => it.name).filter(Boolean).join(', ')
 
-    let text = switching ? copy.switching(label) : copy.opening(label)
-    if (names) {
-      text += ` Sir, these are available options: ${names}. ${copy.whatOrder}`
+    let text = ""
+    if (lang === 'hi') {
+      text = `ठीक है सर, ${label} दिखा रहे हैं। ${names ? `सर, ये उपलब्ध आइटम हैं: ${names}. ` : ''}आप क्या ऑर्डर करना चाहेंगे?`
+    } else if (lang === 'mr') {
+      text = `ठीक आहे सर, ${label} दाखवत आहे. ${names ? `सर, हे उपलब्ध आयटम्स आहेत: ${names}. ` : ''}आपण काय ऑर्डर करणार आहात?`
     } else {
-      text += ` ${copy.whatOrder}`
+      text = `Okay sir, showing ${label}. ${names ? `Sir, these are available items: ${names}. ` : ''}What would you like to order?`
     }
 
     speakNow(text, lang)
@@ -190,7 +201,7 @@ export function useVoiceOrdering({
     if (onCartUpdated) onCartUpdated()
     clearSilenceTimers()
 
-    speakNow(copy.added, lang)
+    speakNow(copy.added + " " + copy.anythingElse, lang)
     stepRef.current = 'ANYTHING_ELSE'
 
     silenceTimer1Ref.current = setTimeout(() => {
@@ -206,10 +217,14 @@ export function useVoiceOrdering({
           nav('/cart')
         }, 5000)
       }, 5000)
-    }, 4500)
+    }, 5000)
   }
 
   function handleTranscript(rawTranscript) {
+    if (isSpeaking()) {
+      return
+    }
+
     if (commandLockRef.current) return
     commandLockRef.current = true
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -229,13 +244,29 @@ export function useVoiceOrdering({
     const lower = norm
     const step  = stepRef.current
 
+    const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
+    
+    console.log('--- VOICE DEBUG ---')
+    console.log('Original transcript:', rawTranscript)
+    console.log('Normalized transcript:', norm)
+    console.log('Detected category:', parsed.category || null)
+    console.log('Detected item:', parsed.item || (parsed.menuItem ? parsed.menuItem.name : null))
+    console.log('Match confidence:', parsed.confidence || 0)
+    console.log('-------------------')
+
     // Category Switching / Recognition can happen at ANY time when we are on MENU page
     if (page === 'MENU') {
       const catKey = detectCategoryIntent(rawTranscript)
       if (catKey) {
-        const switching = currentVoiceCategoryRef.current !== null && currentVoiceCategoryRef.current !== catKey
-        applyCategory(catKey, switching)
-        return
+        const isExplicitCategorySwitch = /\b(show|open|display|let me see|switch to|go to|actually|change to)\b/i.test(lower)
+        const pureCategories = ['starter', 'starters', 'snacks', 'appetizer', 'main', 'main course', 'maincourse', 'meal', 'food', 'lunch', 'dinner', 'drink', 'drinks', 'beverage', 'cold drink', 'dessert', 'desserts', 'sweets']
+        const isPure = pureCategories.some(c => lower.includes(c))
+
+        if (isExplicitCategorySwitch || isPure) {
+          const switching = currentVoiceCategoryRef.current !== null && currentVoiceCategoryRef.current !== catKey
+          applyCategory(catKey, switching)
+          return
+        }
       }
     }
 
@@ -252,7 +283,6 @@ export function useVoiceOrdering({
 
     // WAITING FOR ITEM (ITEM_SELECTION) state when quantity was provided
     if (step === 'ITEM_SELECTION') {
-      const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
       if (parsed.intent === 'ADD_ITEM' && parsed.menuItem) {
         addItemAndSchedule(parsed.menuItem, pendingQtyRef.current || 1)
         pendingQtyRef.current = null
@@ -262,7 +292,6 @@ export function useVoiceOrdering({
 
     // ANYTHING_ELSE loop responses
     if (step === 'ANYTHING_ELSE') {
-      const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
       if (parsed.intent === 'YES') {
         clearSilenceTimers()
         stepRef.current = 'MENU_ENTRY'
@@ -278,7 +307,6 @@ export function useVoiceOrdering({
 
     // CART page specific handling
     if (page === 'CART') {
-      const parsed = parseVoice(rawTranscript, [])
       if (parsed.intent === 'CONFIRM_ORDER' || parsed.intent === 'YES') {
         if (!state.cart.items.length) {
           speakNow(copy.emptCart, lang)
@@ -289,14 +317,12 @@ export function useVoiceOrdering({
         return
       }
       if (parsed.intent === 'REMOVE_ITEM') {
-        // Go back to menu if user wants to edit/change/remove
         nav('/menu')
         return
       }
     }
 
     // General parsing fallbacks
-    const parsed = parseVoice(rawTranscript, menuItemsRef.current || [])
     const intent = parsed.intent
 
     if (intent === 'SWITCH_CATEGORY') {
@@ -329,7 +355,7 @@ export function useVoiceOrdering({
     if (intent === 'ADD_ITEM') {
       if (page === 'MENU') {
         if (!parsed.menuItem) {
-          speakNow(copy.notFound, lang)
+          speakNow(copy.itemUnclear, lang)
           return
         }
         addItemAndSchedule(parsed.menuItem, parsed.qty || 1)
@@ -353,6 +379,39 @@ export function useVoiceOrdering({
       if (page === 'KITCHEN') {
         speakNow(copy.orderPreparing, lang)
       }
+      return
+    }
+
+    if (intent === 'CATEGORY_UNCLEAR') {
+      speakNow(copy.categoryUnclear, lang)
+      return
+    }
+
+    if (intent === 'ITEM_UNCLEAR') {
+      speakNow(copy.itemUnclear, lang)
+      return
+    }
+
+    if (intent === 'BACK') {
+      if (page === 'CART') {
+        nav('/menu')
+      } else if (page === 'MENU') {
+        nav('/')
+      }
+      return
+    }
+
+    if (intent === 'SHOW_MENU') {
+      if (page !== 'MENU') {
+        nav('/menu')
+      } else {
+        speakNow(copy.categoryPrompt, lang)
+      }
+      return
+    }
+
+    if (intent === 'LOW_CONFIDENCE') {
+      speakNow(copy.confidenceLow, lang)
       return
     }
   }

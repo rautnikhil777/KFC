@@ -1,11 +1,22 @@
 // ─── Normalisation helpers ─────────────────────────────────────────────────
 
 function normalize(s) {
-  return String(s || '')
+  let text = String(s || '')
     .toLowerCase()
-    .replace(/[,\.!?;:'"]/g, ' ')
+    .replace(/[,\.!?;:'"’]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+  // Replace concatenated versions
+  text = text
+    .replace(/\bmaincourse\b/g, 'main course')
+    .replace(/\bicecream\b/g, 'ice cream')
+    .replace(/\bgulabjamun\b/g, 'gulab jamun')
+    .replace(/\bcolddrink\b/g, 'cold drink')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return text
 }
 
 function extractQuantity(text) {
@@ -35,56 +46,86 @@ function stripNumbers(text) {
     .trim()
 }
 
+function levenshtein(a, b) {
+  const matrix = []
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          Math.min(
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1 // deletion
+          )
+        )
+      }
+    }
+  }
+  return matrix[b.length][a.length]
+}
+
+function stringSimilarity(s1, s2) {
+  if (s1 === s2) return 1.0
+  if (s1.length === 0 || s2.length === 0) return 0.0
+  const dist = levenshtein(s1, s2)
+  return 1.0 - dist / Math.max(s1.length, s2.length)
+}
+
+function stemWord(word) {
+  if (word.endsWith('s') && word.length > 3) {
+    return word.slice(0, -1)
+  }
+  return word
+}
+
 // ─── Category synonym table ────────────────────────────────────────────────
 
 const CATEGORY_SYNONYMS = {
   starter:          'starter',
   starters:         'starter',
   snacks:           'starter',
-  snack:            'starter',
-  'beginning items':'starter',
   appetizer:        'starter',
-  appetizers:       'starter',
-  'starting items': 'starter',
-  'start with':     'starter',
 
-  'main course':    'mains',
-  'main courses':   'mains',
-  maincourse:       'mains',
-  mains:            'mains',
-  'main dish':      'mains',
-  'main dishes':    'mains',
-  main:             'mains',
-  meal:             'mains',
-  meals:            'mains',
-  food:             'mains',
-  lunch:            'mains',
-  dinner:           'mains',
+  main:             'main',
+  'main course':    'main',
+  maincourse:       'main',
+  meal:             'main',
+  food:             'main',
+  lunch:            'main',
+  dinner:           'main',
 
   drink:            'drinks',
   drinks:           'drinks',
-  beverages:        'drinks',
   beverage:         'drinks',
-  juice:            'drinks',
-  juices:           'drinks',
   'cold drink':     'drinks',
-  'cold drinks':    'drinks',
-  soda:             'drinks',
-  water:            'drinks',
-  shakes:           'drinks',
-  shake:            'drinks',
+  juice:            'drinks',
 
   dessert:          'dessert',
   desserts:         'dessert',
   sweet:            'dessert',
   sweets:           'dessert',
   'ice cream':      'dessert',
-  'ice creams':     'dessert',
-  icecream:         'dessert',
-  pudding:          'dessert',
-  'sweet dish':     'dessert',
-  'sweet dishes':   'dessert',
-  'something sweet':'dessert',
+}
+
+const ITEM_ALIASES = {
+  'Samosa': ['samosa'],
+  'Hot Soup': ['soup', 'hot soup'],
+  'Paneer Curry': ['paneer', 'paneer curry', 'curry'],
+  'Veg Biryani': ['biryani', 'veg biryani'],
+  'Cheese Burger': ['burger', 'cheese burger'],
+  'Fresh Juice': ['juice', 'fresh juice'],
+  'Cold Coke': ['coke', 'cola', 'cold coke'],
+  'Mineral Water': ['water', 'mineral water'],
+  'Ice Cream': ['icecream', 'ice cream'],
+  'Gulab Jamun': ['gulab jamun', 'jamun', 'sweet']
 }
 
 export function detectCategoryIntent(raw) {
@@ -117,7 +158,7 @@ export function detectCategoryIntent(raw) {
 
 export const CATEGORY_DISPLAY_NAMES = {
   starter:  'Starters',
-  mains:    'Main Course',
+  main:     'Main Course',
   drinks:   'Drinks',
   dessert:  'Dessert',
 }
@@ -127,37 +168,82 @@ function bestMatchMenuItem(spoken, menuItems) {
   if (!s || !Array.isArray(menuItems) || menuItems.length === 0) return null
 
   let best = null
-  let bestScore = -Infinity
+  let bestScore = 0
+  let bestConfidence = 0.0
 
   for (const it of menuItems) {
     const name = normalize(it?.name)
-    const cat  = normalize(it?.category)
-
-    if (!name) continue
+    const aliases = ITEM_ALIASES[it?.name] || []
+    const normalizedAliases = aliases.map(normalize)
 
     let score = 0
-    if (s === name)          score += 100
-    if (s.includes(name))    score += 70
-    if (name.includes(s))    score += 40
+    let confidence = 0.0
 
-    const sTokens = new Set(s.split(' ').filter(Boolean))
-    const nTokens = new Set(name.split(' ').filter(Boolean))
-    for (const tok of sTokens) if (nTokens.has(tok)) score += 10
+    if (s === name) {
+      score = 1000
+      confidence = 1.0
+    } else if (normalizedAliases.includes(s)) {
+      score = 950
+      confidence = 0.95
+    } else if (name.includes(s) || s.includes(name)) {
+      score = 800
+      confidence = 0.8
+    } else if (normalizedAliases.some(a => a.includes(s) || s.includes(a))) {
+      score = 750
+      confidence = 0.75
+    } else {
+      const sTokens = s.split(' ').filter(Boolean)
+      const sTokensStemmed = sTokens.map(stemWord)
+      const nTokens = name.split(' ').filter(Boolean)
 
-    if (cat && s.includes(cat)) score += 5
+      let overlap = 0
+      for (const tok of sTokensStemmed) {
+        if (nTokens.includes(tok) || normalizedAliases.some(a => a.split(' ').map(stemWord).includes(tok))) {
+          overlap++
+        }
+      }
+
+      if (overlap > 0) {
+        score = 500 + overlap * 10
+        confidence = 0.5 + (overlap / Math.max(sTokens.length, nTokens.length)) * 0.2
+      } else {
+        const nameSim = stringSimilarity(s, name)
+        let maxAliasSim = 0
+        for (const a of normalizedAliases) {
+          const sim = stringSimilarity(s, a)
+          if (sim > maxAliasSim) maxAliasSim = sim
+        }
+        const bestSim = Math.max(nameSim, maxAliasSim)
+        if (bestSim > 0.6) {
+          score = 100 + bestSim * 100
+          confidence = bestSim
+        }
+      }
+    }
 
     if (score > bestScore) {
       bestScore = score
       best = it
+      bestConfidence = confidence
     }
   }
 
-  if (bestScore < 10) return null
-  return best
+  if (bestScore === 0) return null
+  return { item: best, score: bestScore, confidence: bestConfidence }
 }
 
 function detectBaseIntent(t) {
   if (!t) return null
+
+  if (
+    t === 'change category' || t.includes('change category') ||
+    t === 'something else' || t.includes('something else') ||
+    t === 'another option' || t.includes('another option')
+  ) return 'CATEGORY_UNCLEAR'
+
+  if (t === 'back' || t.includes('go back') || t === 'go back') return 'BACK'
+
+  if (t === 'show menu' || t.includes('show menu')) return 'SHOW_MENU'
 
   if (
     t === 'confirm' || t === 'place order' || t === 'go ahead' || t === 'okay' || t === 'ok' ||
@@ -168,8 +254,8 @@ function detectBaseIntent(t) {
 
   if (
     t === 'yes' || t === 'yeah' || t === 'yup' || t === 'yep' || t === 'ha' || t === 'haa' ||
-    t === 'continue' || t === 'add more' || t === 'next' || t === 'more' || t === 'show menu' ||
-    t.includes('show menu') || t.includes('add more') || t.includes('continue ordering')
+    t === 'continue' || t === 'add more' || t === 'next' || t === 'more' ||
+    t.includes('add more') || t.includes('continue ordering')
   ) return 'YES'
 
   if (
@@ -247,9 +333,12 @@ export function parseVoice(text, menuItems) {
     return { intent: base }
   }
 
-  const catKey = detectCategoryIntent(text)
-  if (catKey) {
-    return { intent: 'SWITCH_CATEGORY', category: catKey }
+  const isExplicitCategorySwitch = /\b(show|open|display|let me see|switch to|go to|actually|change to)\b/i.test(t)
+  if (isExplicitCategorySwitch) {
+    const catKey = detectCategoryIntent(text)
+    if (catKey) {
+      return { intent: 'SWITCH_CATEGORY', category: catKey }
+    }
   }
 
   if (isRepeatLastIntent(text)) {
@@ -260,24 +349,41 @@ export function parseVoice(text, menuItems) {
     return { intent: 'AMBIGUOUS_QTY', qty: explicitQty }
   }
 
-  if (base === 'ADD_ITEM' || base === null) {
-    let cleaned = stripNumbers(text)
-    cleaned = cleaned
-      .replace(/\b(add|another|more|please|want|i want|i would like|order|buy|give me|get me|bring me)\b/gi, ' ')
-      .trim()
-    cleaned = cleaned || stripNumbers(text)
+  let cleaned = stripNumbers(text)
+  const hadAddItemVerb = /\b(add|another|more|please|want|i want|i would like|order|buy|give me|get me|bring me)\b/gi.test(cleaned)
 
-    const matched = bestMatchMenuItem(cleaned, menuItems || [])
-    if (matched) {
+  cleaned = cleaned
+    .replace(/\b(add|another|more|please|want|i want|i would like|order|buy|give me|get me|bring me)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const matchResult = bestMatchMenuItem(cleaned || stripNumbers(text), menuItems || [])
+  if (matchResult) {
+    const { item: matched, confidence } = matchResult
+    if (confidence >= 0.5) {
       if (explicitQty !== null) {
-        return { intent: 'ADD_ITEM', item: matched.name, menuItem: matched, qty }
+        return { intent: 'ADD_ITEM', item: matched.name, menuItem: matched, qty, confidence }
       } else {
-        return { intent: 'ADD_ITEM_MISSING_QTY', item: matched.name, menuItem: matched }
+        return { intent: 'ADD_ITEM_MISSING_QTY', item: matched.name, menuItem: matched, confidence }
       }
+    } else {
+      return { intent: 'ITEM_UNCLEAR' }
     }
-
-    return { intent: 'ADD_ITEM', item: cleaned, menuItem: null, qty }
   }
 
-  return { intent: null }
+  if (hadAddItemVerb && !cleaned) {
+    return { intent: 'ITEM_UNCLEAR' }
+  }
+
+  const catKey = detectCategoryIntent(text)
+  if (catKey) {
+    return { intent: 'SWITCH_CATEGORY', category: catKey }
+  }
+
+  if (hadAddItemVerb) {
+    return { intent: 'ITEM_UNCLEAR' }
+  }
+
+  return { intent: 'LOW_CONFIDENCE' }
 }
+
