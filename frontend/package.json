@@ -16,8 +16,10 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "jspdf": "^4.2.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-qr-code": "^2.2.0",
     "react-router-dom": "^7.17.0"
   },
   "devDependencies": {
