@@ -77,7 +77,7 @@ const COPY = {
     sendingKitchen: 'Your order has been sent to the kitchen. Thank you!',
     categoryPrompt: 'What would you like today? You may choose Starters, Main Course, Drinks, or Dessert.',
     whichItem: 'Which item would you like sir?',
-    howMany: 'How many would you like sir?',
+    // howMany: 'How many would you like sir?',
     emptCart: 'Your cart is empty. Please add some items first.',
     noRepeat: 'I do not have a previous item to repeat. What would you like to order?',
     cartGreeting: 'Here is your order. Say confirm or yes to place it, or no to go back to the menu.',

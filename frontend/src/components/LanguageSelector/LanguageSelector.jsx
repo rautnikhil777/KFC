@@ -2,8 +2,8 @@ import styles from './languageSelector.module.css'
 
 const LANGS = [
   { key: 'en', label: 'English' },
-  { key: 'hi', label: 'हिन्दी' },
-  { key: 'mr', label: 'मराठी' },
+  // { key: 'hi', label: 'हिन्दी' },
+  // { key: 'mr', label: 'मराठी' },
 ]
 
 export default function LanguageSelector({ language, onChange }) {

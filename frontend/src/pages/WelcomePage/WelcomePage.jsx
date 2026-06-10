@@ -54,7 +54,7 @@ export default function WelcomePage() {
     if (state.mode !== 'voice') return
     // Welcome speech once language is selected.
     const t = setTimeout(() => {
-      speak('Welcome to KFC. Please select language.', state.language)
+      speak('Welcome to KFC. Please select your mode voice or touch.', state.language)
     }, 50)
     return () => clearTimeout(t)
   }, [state.mode, state.language])
