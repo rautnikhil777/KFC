@@ -56,6 +56,13 @@ const COPY = {
   },
 }
 
+function getItemQty(item) {
+  const value = item?.quantity ?? item?.qty ?? item?.count ?? 1
+  const num = Number(value)
+  if (Number.isNaN(num) || num < 1) return 1
+  return num
+}
+
 export default function TrackPage() {
   const { orderId } = useParams()
   const nav = useNavigate()
@@ -191,7 +198,9 @@ export default function TrackPage() {
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(10)
     doc.text('Item', left + 4, y + 6)
-    doc.text('Qty', pageWidth - 42, y + 6, { align: 'right' })
+    doc.text('Qty', 118, y + 6, { align: 'right' })
+    doc.text('Price', 155, y + 6, { align: 'right' })
+    doc.text('Amount', right - 4, y + 6, { align: 'right' })
 
     y += 12
 
@@ -203,7 +212,25 @@ export default function TrackPage() {
       if (y > pageHeight - 45) {
         doc.addPage()
         y = 20
+
+        doc.setFillColor(198, 40, 40)
+        doc.rect(left, y, pageWidth - 28, 9, 'F')
+        doc.setTextColor(255, 255, 255)
+        doc.setFontSize(10)
+        doc.text('Item', left + 4, y + 6)
+        doc.text('Qty', 118, y + 6, { align: 'right' })
+        doc.text('Price', 155, y + 6, { align: 'right' })
+        doc.text('Amount', right - 4, y + 6, { align: 'right' })
+        y += 12
+
+        doc.setTextColor(17, 24, 39)
+        doc.setFont('helvetica', 'normal')
+        doc.setDrawColor(230, 230, 230)
       }
+
+      const qty = getItemQty(it)
+      const unitPrice = Number(it.price || 0)
+      const lineTotal = qty * unitPrice
 
       if (idx % 2 === 0) {
         doc.setFillColor(250, 250, 250)
@@ -211,7 +238,9 @@ export default function TrackPage() {
       }
 
       doc.text(String(it.name || ''), left + 4, y + 2)
-      doc.text(String(it.quantity || 0), pageWidth - 42, y + 2, { align: 'right' })
+      doc.text(String(qty), 118, y + 2, { align: 'right' })
+      doc.text(money(unitPrice), 155, y + 2, { align: 'right' })
+      doc.text(money(lineTotal), right - 4, y + 2, { align: 'right' })
       doc.line(left, y + 5, right, y + 5)
 
       y += 10
@@ -323,7 +352,7 @@ export default function TrackPage() {
                       <div key={idx} className={styles.itemRow}>
                         <div style={{ fontWeight: 950 }}>{it.name}</div>
                         <div className="muted" style={{ fontWeight: 800 }}>
-                          Qty: {it.quantity}
+                          Qty: {getItemQty(it)}
                         </div>
                       </div>
                     ))}
