@@ -303,9 +303,7 @@ export default function TrackPage() {
 
   const isPayDisabled =
     busy ||
-    (order?.status !== 'ready' &&
-      order?.status !== 'sent_to_kitchen' &&
-      order?.status !== 'preparing')
+    !['confirmed', 'ready', 'sent_to_kitchen', 'preparing'].includes(order?.status)
 
   return (
     <div className="container">
