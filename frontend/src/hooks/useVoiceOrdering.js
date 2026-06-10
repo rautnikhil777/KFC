@@ -72,10 +72,10 @@ const COPY = {
     anythingElse: 'Anything else sir?',
     added: 'Added to cart.',
     sendingKitchen: 'Your order has been sent to the kitchen. Thank you!',
-    categoryPrompt: 'What would you like today? You may choose Starters, Main Course, Drinks, or Dessert.',
+    categoryPrompt: 'What would you like today? You may choose Starters, Main Course,or Drinks.',
     cartGreeting: 'Here is your order. Say confirm or yes to place it, or no to go back to the menu.',
     confirmOptions: 'Say yes or confirm to place your order, or no to go back.',
-    recovery: 'I did not understand. You may choose Starters, Main Course, Drinks or Dessert.',
+    recovery: 'I did not understand. You may choose Starters, Main Course,or Drinks .',
     itemUnclear: 'I could not find that item. Please say the item name again.',
   },
   hi: {
@@ -457,7 +457,7 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
       if (k === 'main' && cat.includes('main')) return true
       if (k === 'starter' && (cat.includes('starter') || cat.includes('start'))) return true
       if (k === 'drinks' && (cat.includes('drink') || cat.includes('beverage'))) return true
-      if (k === 'dessert' && (cat.includes('dessert') || cat.includes('sweet'))) return true
+      // if (k === 'dessert' && (cat.includes('dessert') || cat.includes('sweet'))) return true
       return false
     })
   }

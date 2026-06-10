@@ -13,7 +13,7 @@ const COPY = {
   en: {
     title: 'Menu',
     subtitle: 'Add items to your cart',
-    empty: 'Start by adding a starter/main/drink/dessert.',
+    empty: 'Start by adding a starter/main/drink.',
     categories: 'Categories',
     add: 'Add',
     notes: 'Notes (optional)',
@@ -23,7 +23,7 @@ const COPY = {
   hi: {
     title: 'मेनू',
     subtitle: 'कार्ट में आइटम जोड़ें',
-    empty: 'पहले कोई Starter/Main/Drink/Dessert जोड़ें।',
+    empty: 'पहले कोई Starter/Main/Drink जोड़ें।',
     categories: 'कैटेगरी',
     add: 'जोड़ें',
     notes: 'नोट्स (वैकल्पिक)',
@@ -33,7 +33,7 @@ const COPY = {
   mr: {
     title: 'मेनू',
     subtitle: 'कार्टमध्ये आयटम जोडा',
-    empty: 'प्रथम काही Starter/Main/Drink/Dessert जोडा.',
+    empty: 'प्रथम काही Starter/Main/Drink जोडा.',
     categories: 'कॅटेगरी',
     add: 'जो़डा',
     notes: 'नोट्स (ऐच्छिक)',
@@ -140,8 +140,8 @@ export default function MenuPage() {
                 fontWeight: 'bold',
                 backgroundColor:
                   voiceCtrl.voiceStatus === 'SPEAKING' ? '#0070f3' :
-                  voiceCtrl.voiceStatus === 'LISTENING' ? '#10b981' :
-                  voiceCtrl.voiceStatus === 'PROCESSING' ? '#f59e0b' : '#6b7280',
+                    voiceCtrl.voiceStatus === 'LISTENING' ? '#10b981' :
+                      voiceCtrl.voiceStatus === 'PROCESSING' ? '#f59e0b' : '#6b7280',
                 color: '#fff',
               }}>
                 <span className="dot" style={{
@@ -152,8 +152,8 @@ export default function MenuPage() {
                   display: 'inline-block',
                 }} />
                 {voiceCtrl.voiceStatus === 'LISTENING' ? 'Listening' :
-                 voiceCtrl.voiceStatus === 'PROCESSING' ? 'Understanding' :
-                 voiceCtrl.voiceStatus === 'SPEAKING' ? 'Speaking' : 'Idle'}
+                  voiceCtrl.voiceStatus === 'PROCESSING' ? 'Understanding' :
+                    voiceCtrl.voiceStatus === 'SPEAKING' ? 'Speaking' : 'Idle'}
               </div>
             )}
 

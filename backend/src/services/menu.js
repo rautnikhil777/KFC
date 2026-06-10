@@ -25,14 +25,14 @@ const MENU = [
       { menuItemId: 'drink_water', name: 'Mineral Water', price: 40, category: 'drinks' },
     ],
   },
-  {
-    key: 'dessert',
-    title: 'Dessert',
-    items: [
-      { menuItemId: 'dessert_icecream', name: 'Ice Cream', price: 110, category: 'dessert' },
-      { menuItemId: 'dessert_gulabjamun', name: 'Gulab Jamun', price: 130, category: 'dessert' },
-    ],
-  },
+  // {
+  //   key: 'dessert',
+  //   title: 'Dessert',
+  //   items: [
+  //     { menuItemId: 'dessert_icecream', name: 'Ice Cream', price: 110, category: 'dessert' },
+  //     { menuItemId: 'dessert_gulabjamun', name: 'Gulab Jamun', price: 130, category: 'dessert' },
+  //   ],
+  // },
 ]
 
 module.exports = { MENU }
