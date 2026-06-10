@@ -11,14 +11,12 @@
  *
  * STATE MACHINE (stepRef)
  * ───────────────────────
- *  IDLE            – hook inactive
- *  CATEGORY        – listening for a category (starters / main / drinks / dessert)
- *  ITEM            – listening for an item name + optional quantity
- *  WAITING_FOR_QTY – item known; waiting for a quantity
- *  ITEM_SELECTION  – quantity known; waiting for item name
- *  ANYTHING_ELSE   – item added; asking if user wants more
- *  CART_CONFIRM    – on cart page; listening for confirm/yes/no
- *  KITCHEN         – order sent; no listening needed
+ *  IDLE          – hook inactive
+ *  CATEGORY      – listening for a category (starters / main / drinks / dessert)
+ *  ITEM          – listening for an item name
+ *  ANYTHING_ELSE – item added; asking if user wants more
+ *  CART_CONFIRM  – on cart page; listening for confirm/yes/no
+ *  KITCHEN       – order sent; no listening needed
  *
  * FLOW
  * ────
@@ -39,7 +37,6 @@ import { apiConfirmOrder } from '../services/api.js'
 import {
   CATEGORY_DISPLAY_NAMES,
   detectCategoryIntent,
-  extractQuantity,
   parseVoice,
 } from '../services/intentParser.js'
 import {
@@ -76,48 +73,30 @@ const COPY = {
     added: 'Added to cart.',
     sendingKitchen: 'Your order has been sent to the kitchen. Thank you!',
     categoryPrompt: 'What would you like today? You may choose Starters, Main Course, Drinks, or Dessert.',
-    whichItem: 'Which item would you like sir?',
-    // howMany: 'How many would you like sir?',
-    emptCart: 'Your cart is empty. Please add some items first.',
-    noRepeat: 'I do not have a previous item to repeat. What would you like to order?',
     cartGreeting: 'Here is your order. Say confirm or yes to place it, or no to go back to the menu.',
     confirmOptions: 'Say yes or confirm to place your order, or no to go back.',
     recovery: 'I did not understand. You may choose Starters, Main Course, Drinks or Dessert.',
-    confidenceLow: 'Sorry, I did not catch that. Please try again.',
     itemUnclear: 'I could not find that item. Please say the item name again.',
-    categoryUnclear: 'Would you like Starters, Main Course, Drinks or Dessert?',
   },
   hi: {
     anythingElse: 'कुछ और चाहिए सर?',
     added: 'कार्ट में जोड़ दिया।',
     sendingKitchen: 'आपका ऑर्डर किचन को भेज दिया गया।',
     categoryPrompt: 'सर, आज आप क्या लेना चाहेंगे? स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट।',
-    whichItem: 'कौन सा आइटम सर?',
-    howMany: 'कितने सर?',
-    emptCart: 'कार्ट खाली है।',
-    noRepeat: 'कोई पिछला आइटम नहीं मिला।',
     cartGreeting: 'सर, ये आपके चुने हुए आइटम हैं। ऑर्डर देने के लिए हाँ कहें।',
     confirmOptions: 'हाँ या कन्फर्म कहें, या ना कहें।',
     recovery: 'समझ नहीं आया। स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट चुनें।',
-    confidenceLow: 'माफ़ कीजिये, मुझे समझ नहीं आया।',
     itemUnclear: 'कृपया आइटम का नाम फिर से बताएं।',
-    categoryUnclear: 'आप स्टार्टर, मेन कोर्स, ड्रिंक्स या डेज़र्ट लेना चाहेंगे?',
   },
   mr: {
     anythingElse: 'काही अजून सर?',
     added: 'कार्टमध्ये जोडले.',
     sendingKitchen: 'आपला ऑर्डर किचनला पाठवला.',
     categoryPrompt: 'सर, आज आपण काय घेणार? स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट.',
-    whichItem: 'कोणता आयटम सर?',
-    howMany: 'किती सर?',
-    emptCart: 'कार्ट रिकामे आहे.',
-    noRepeat: 'मागील आयटम सापडला नाही.',
     cartGreeting: 'सर, हे आपले आयटम आहेत. ऑर्डर द्यायला हो म्हणा.',
     confirmOptions: 'हो किंवा कन्फर्म म्हणा, किंवा नाही म्हणा.',
     recovery: 'समजलं नाही. स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट निवडा.',
-    confidenceLow: 'माफ करा, मला समजले नाही.',
     itemUnclear: 'कृपया आयटमचे नाव पुन्हा सांगा.',
-    categoryUnclear: 'स्टार्टर, मेन कोर्स, ड्रिंक्स किंवा डेझर्ट?',
   },
 }
 
@@ -138,64 +117,26 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
   const nav = useNavigate()
   const { state, addCartItemLocal, setCart, changeQuantityLocal } = useContext(OrderSessionContext)
 
-  // Keep menuItems accessible inside callbacks without stale closures
   const menuItemsRef = useRef(menuItems || [])
   useEffect(() => { menuItemsRef.current = menuItems || [] }, [menuItems])
 
   const lang = safeLang(state.language)
   const copy = useMemo(() => COPY[lang] || COPY.en, [lang])
 
-  // UI badge state ('IDLE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING')
   const [voiceStatus, setVoiceStatus] = useState('IDLE')
 
-  // ── Core state refs (avoid React re-render churn) ─────────────────────────
-
-  /** Current step in the voice state machine */
   const stepRef = useRef('IDLE')
-
-  /** Category currently displayed / selected by voice */
   const currentCategoryRef = useRef(null)
-
-  /** Last item added — used for "same again" / repeat intent */
   const lastAddedItemRef = useRef(null)
-  const lastQtyRef = useRef(null)
-
-  /** Pending item waiting for quantity confirmation */
-  const pendingItemRef = useRef(null)
-
-  /** Pending quantity waiting for item name */
-  const pendingQtyRef = useRef(null)
-
-  /** Callback into MenuPage to switch the active category tab */
   const onSelectCategoryRef = useRef(null)
-
-  /** Mounted guard — prevents state updates after component unmounts */
   const mountedRef = useRef(true)
-
-  /** Prevents same transcript from being processed twice in a row */
   const lastProcessedRef = useRef('')
-
-  /** Prevents concurrent transcript processing */
   const processingRef = useRef(false)
-
-  /** Simple execution lock to prevent concurrent transcript processing and duplication */
-  const voiceLockRef = useRef(false)
-
-  /** Timestamp index of processed items to avoid SpeechRecognition duplication within 6s */
   const lastProcessedItemTimesRef = useRef({})
 
-  // ── Timer refs ────────────────────────────────────────────────────────────
-
-  /** "Anything else?" first silence timer (fires at T1 ms) */
   const aeTimer1Ref = useRef(null)
-
-  /** "Anything else?" second silence timer (fires at T1+T2 ms → navigate) */
   const aeTimer2Ref = useRef(null)
-
-  /** Restart-after-unexpected-end timer */
   const restartTimerRef = useRef(null)
-
-  // ── Util: clear timers ────────────────────────────────────────────────────
 
   function clearAETimers() {
     if (aeTimer1Ref.current) { clearTimeout(aeTimer1Ref.current); aeTimer1Ref.current = null }
@@ -207,56 +148,25 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null }
   }
 
-  // ─── speakThen ─────────────────────────────────────────────────────────────
-  //
-  // THE ONLY way to speak. Enforces the mutex by stopping listening first.
-  // Calls afterFn (if provided) after a safe delay post-TTS.
-  //
   function speakThen(text, afterFn) {
-    if (!mountedRef.current) {
-      voiceLockRef.current = false
-      processingRef.current = false
-      return
-    }
+    if (!mountedRef.current) return
 
-    // Mutex rule: stop mic before speaking
     stopListening()
-
-    // Ensure voice lock is active during speaking
-    voiceLockRef.current = true
-
-    // Reset dedup so the next utterance from the user is treated fresh
     lastProcessedRef.current = ''
 
     if (mountedRef.current) setVoiceStatus('SPEAKING')
 
     speak(text, lang, () => {
-      // TTS finished (or errored)
-      if (!mountedRef.current) {
-        voiceLockRef.current = false
-        processingRef.current = false
-        return
-      }
+      if (!mountedRef.current) return
       if (mountedRef.current) setVoiceStatus('IDLE')
       if (typeof afterFn === 'function') {
-        // Small delay: prevents mic from picking up speaker echo
         setTimeout(() => {
-          if (!mountedRef.current) return
-          voiceLockRef.current = false
-          processingRef.current = false
-          afterFn()
+          if (mountedRef.current) afterFn()
         }, POST_SPEAK_DELAY_MS)
-      } else {
-        voiceLockRef.current = false
-        processingRef.current = false
       }
     })
   }
 
-  // ─── startListeningControlled ───────────────────────────────────────────────
-  //
-  // THE ONLY way to start listening. Guards the mutex.
-  //
   function startListeningControlled() {
     if (!mountedRef.current) return
     if (!enabled) return
@@ -280,27 +190,14 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     }
   }
 
-  // ─── Barge-in handler ──────────────────────────────────────────────────────
-  //
-  // Fires from listen.js onspeechstart — the instant user speech is detected.
-  // If TTS is playing, cancel it immediately so the user's speech is captured.
-  //
   function handleBargeIn() {
     if (!mountedRef.current) return
-    clearAETimers()
     if (isSpeaking()) {
       stopSpeak()
       if (mountedRef.current) setVoiceStatus('LISTENING')
-      // Cancel locks since TTS was stopped and the callback won't fire
-      voiceLockRef.current = false
-      processingRef.current = false
     }
   }
 
-  // ─── Recognition end handler ────────────────────────────────────────────────
-  //
-  // Called when the recognition session ends. The hook decides whether/when to restart.
-  //
   function handleListenEnd({ manual }) {
     if (!mountedRef.current) return
     if (manual) return
@@ -315,46 +212,30 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     }, RESTART_DELAY_MS)
   }
 
-  // ─── Recognition error handler ──────────────────────────────────────────────
-
   function handleListenError(e) {
     console.warn('[Voice] Recognition error:', e?.error || e)
   }
 
-  // ─── Result handler ─────────────────────────────────────────────────────────
-  //
-  // Receives { transcript, isFinal } from listen.js.
-  //
   function handleResult({ transcript, isFinal }) {
     if (!mountedRef.current || !enabled) return
 
-    // If speaking, handle barge-in first to cancel TTS and release lock
     if (isSpeaking()) {
       stopSpeak()
       if (mountedRef.current) setVoiceStatus('LISTENING')
-      voiceLockRef.current = false
-      processingRef.current = false
+      if (!isFinal) return
     }
 
-    // Ensure ONLY final speech results are processed (ignore interim)
     if (!isFinal) {
       if (stepRef.current === 'ANYTHING_ELSE') clearAETimers()
       if (mountedRef.current) setVoiceStatus('PROCESSING')
       return
     }
 
-    // Ensure one lock mechanism prevents concurrent execution
-    if (voiceLockRef.current || processingRef.current) {
-      console.log('[Voice] Lock active, ignoring transcript:', transcript)
-      return
-    }
-
     const norm = transcript.trim().toLowerCase()
     if (!norm) return
-
     if (norm === lastProcessedRef.current) return
 
-    voiceLockRef.current = true
+    if (processingRef.current) return
     processingRef.current = true
     lastProcessedRef.current = norm
 
@@ -362,27 +243,17 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
 
     try {
       processTranscript(transcript)
-    } catch (e) {
-      console.error('[Voice] processTranscript error:', e)
-      voiceLockRef.current = false
+    } finally {
       processingRef.current = false
-      if (mountedRef.current) setVoiceStatus('IDLE')
     }
   }
 
-  // ─── Core transcript processor ──────────────────────────────────────────────
-  //
-  // Routes transcript to the correct handler based on stepRef.current.
-  //
   function processTranscript(rawTranscript) {
     const step = stepRef.current
 
     console.log(`[Voice] step=${step} | transcript="${rawTranscript}"`)
 
-    let processed = false
-
     if (step === 'CATEGORY') {
-      processed = true
       const catKey = detectCategoryIntent(rawTranscript)
       if (catKey) {
         applyCategory(catKey)
@@ -392,38 +263,7 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
       return
     }
 
-    if (step === 'WAITING_FOR_QTY') {
-      processed = true
-      const rawQty = extractQuantity(rawTranscript)
-      const qty = Math.min(Math.max(rawQty ?? 1, 1), 5)
-      if (pendingItemRef.current) {
-        const item = pendingItemRef.current
-        pendingItemRef.current = null
-        addItemAndSchedule(item, qty)
-        return
-      } else {
-        voiceLockRef.current = false
-        processingRef.current = false
-        startListeningControlled()
-        return
-      }
-    }
-
-    if (step === 'ITEM_SELECTION') {
-      processed = true
-      const parsed = parseVoice(rawTranscript, menuItemsRef.current)
-      if (parsed.intent === 'ADD_ITEM' && parsed.menuItem) {
-        const qty = Math.min(Math.max(pendingQtyRef.current || 1, 1), 5)
-        addItemAndSchedule(parsed.menuItem, qty)
-        pendingQtyRef.current = null
-        return
-      }
-      speakThen(copy.whichItem, startListeningControlled)
-      return
-    }
-
     if (step === 'ANYTHING_ELSE') {
-      processed = true
       clearAETimers()
       const parsed = parseVoice(rawTranscript, menuItemsRef.current)
 
@@ -432,40 +272,33 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
         speakThen(copy.categoryPrompt, startListeningControlled)
         return
       }
+
       if (parsed.intent === 'NO') {
-        voiceLockRef.current = false
-        processingRef.current = false
         nav('/cart')
         return
       }
+
       const catKey = detectCategoryIntent(rawTranscript)
       if (catKey) {
         applyCategory(catKey)
         return
       }
-      if (parsed.intent === 'ADD_ITEM' && parsed.menuItem) {
-        const qty = Math.min(Math.max(parsed.qty || 1, 1), 5)
-        addItemAndSchedule(parsed.menuItem, qty)
+
+      if (parsed.menuItem) {
+        addItemAndSchedule(parsed.menuItem, 1)
         return
       }
-      if (parsed.intent === 'ADD_ITEM_MISSING_QTY' && parsed.menuItem) {
-        pendingItemRef.current = parsed.menuItem
-        pendingQtyRef.current = null // Clean reset of pending quantity
-        stepRef.current = 'WAITING_FOR_QTY'
-        speakThen(copy.howMany, startListeningControlled)
-        return
-      }
+
       stepRef.current = 'CATEGORY'
       speakThen(copy.categoryPrompt, startListeningControlled)
       return
     }
 
     if (step === 'ITEM') {
-      processed = true
       const catKey = detectCategoryIntent(rawTranscript)
       const parsed = parseVoice(rawTranscript, menuItemsRef.current)
 
-      if (catKey && (!parsed.menuItem)) {
+      if (catKey && !parsed.menuItem) {
         applyCategory(catKey)
         return
       }
@@ -475,37 +308,16 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
         return
       }
 
-      if (parsed.intent === 'ADD_ITEM' && parsed.menuItem) {
-        const qty = Math.min(Math.max(parsed.qty || 1, 1), 5)
-        addItemAndSchedule(parsed.menuItem, qty)
-        return
-      }
-
-      if (parsed.intent === 'ADD_ITEM_MISSING_QTY' && parsed.menuItem) {
-        pendingItemRef.current = parsed.menuItem
-        pendingQtyRef.current = null // Clean reset of pending quantity
-        stepRef.current = 'WAITING_FOR_QTY'
-        speakThen(copy.howMany, startListeningControlled)
-        return
-      }
-
-      if (parsed.intent === 'AMBIGUOUS_QTY') {
-        const qty = Math.min(Math.max(parsed.qty || 1, 1), 5)
-        pendingQtyRef.current = qty
-        pendingItemRef.current = null // Clean reset of pending item
-        stepRef.current = 'ITEM_SELECTION'
-        speakThen(copy.whichItem, startListeningControlled)
-        return
-      }
-
       if (parsed.intent === 'REPEAT_LAST') {
         const last = lastAddedItemRef.current
-        if (!last?.menuItemId) {
-          speakThen(copy.noRepeat, startListeningControlled)
+        if (last?.menuItemId || last?.name) {
+          addItemAndSchedule(last, 1)
           return
         }
-        const qty = Math.min(Math.max(parsed.qty || 1, 1), 5)
-        addItemAndSchedule(last, qty)
+      }
+
+      if (parsed.menuItem) {
+        addItemAndSchedule(parsed.menuItem, 1)
         return
       }
 
@@ -514,20 +326,15 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     }
 
     if (step === 'CART_CONFIRM' || page === 'CART') {
-      processed = true
       const parsed = parseVoice(rawTranscript, [])
 
       if (parsed.intent === 'CONFIRM_ORDER' || parsed.intent === 'YES') {
         if (!state.cart.items.length) {
-          speakThen(copy.emptCart, startListeningControlled)
+          nav('/menu')
           return
         }
         speakThen(copy.sendingKitchen, () => {
-          confirmOrderFromVoice().catch(err => {
-            console.error('[Voice] Confirm failed:', err)
-            voiceLockRef.current = false
-            processingRef.current = false
-          })
+          confirmOrderFromVoice().catch(err => console.error('[Voice] Confirm failed:', err))
         })
         return
       }
@@ -537,30 +344,16 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
         parsed.intent === 'BACK' ||
         parsed.intent === 'REMOVE_ITEM'
       ) {
-        voiceLockRef.current = false
-        processingRef.current = false
         nav('/menu')
         return
       }
 
       speakThen(copy.confirmOptions, startListeningControlled)
-      return
-    }
-
-    // Fallback if no step matched
-    if (!processed) {
-      voiceLockRef.current = false
-      processingRef.current = false
-      startListeningControlled()
     }
   }
 
-  // ─── applyCategory ──────────────────────────────────────────────────────────
-
   function applyCategory(catKey) {
     clearAETimers()
-    pendingItemRef.current = null
-    pendingQtyRef.current = null
     currentCategoryRef.current = catKey
     stepRef.current = 'ITEM'
 
@@ -588,46 +381,34 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     speakThen(text, startListeningControlled)
   }
 
-  // ─── addItemAndSchedule ──────────────────────────────────────────────────────
-
-  function addItemAndSchedule(menuItem, qty) {
+  function addItemAndSchedule(menuItem, qty = 1) {
     clearAETimers()
-
-    // Clean reset of pending refs to prevent leaking
-    pendingItemRef.current = null
-    pendingQtyRef.current = null
 
     const itemId = menuItem.menuItemId || menuItem.name
     const now = Date.now()
     const lastTime = lastProcessedItemTimesRef.current[itemId]
 
-    // Prevent repeated addition of same item within 5–7 seconds (6s window)
-    if (lastTime && now - lastTime < 6000) {
+    if (lastTime && now - lastTime < 3000) {
       console.log(`[Voice] Deduplicated repeated speech result for item: ${menuItem.name}`)
-      voiceLockRef.current = false
-      processingRef.current = false
-      startListeningControlled()
       return
     }
 
     lastProcessedItemTimesRef.current[itemId] = now
 
-    // quantity must NEVER exceed 5; default to 1 if not explicitly spoken
-    const rawQty = parseInt(qty, 10)
-    const targetQty = Math.min(Math.max(isNaN(rawQty) ? 1 : rawQty, 1), 5)
+    const targetQty = qty || 1
 
     const existing = state.cart.items.find(
       (x) => x.menuItemId === menuItem.menuItemId && x.name === menuItem.name
     )
 
     if (existing) {
-      changeQuantityLocal(menuItem.menuItemId, menuItem.name, targetQty)
+      changeQuantityLocal(menuItem.menuItemId, menuItem.name, existing.quantity + targetQty)
     } else {
       addCartItemLocal({ ...menuItem, quantity: targetQty, notes: '' })
     }
 
     lastAddedItemRef.current = menuItem
-    lastQtyRef.current = targetQty
+
     if (onCartUpdated) onCartUpdated()
 
     stepRef.current = 'ANYTHING_ELSE'
@@ -654,31 +435,15 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     })
   }
 
-  // ─── confirmOrderFromVoice ───────────────────────────────────────────────────
-
   async function confirmOrderFromVoice() {
-    if (!state.sessionId || !state.cart.items.length) {
-      voiceLockRef.current = false
-      processingRef.current = false
-      return
-    }
-    try {
-      const orderRes = await apiConfirmOrder({
-        sessionId: state.sessionId,
-        cartItems: state.cart.items,
-      })
-      setCart({ items: [] })
-      voiceLockRef.current = false
-      processingRef.current = false
-      nav(`/kitchen?orderId=${encodeURIComponent(orderRes.orderId)}`)
-    } catch (err) {
-      console.error('[Voice] Confirm failed:', err)
-      voiceLockRef.current = false
-      processingRef.current = false
-    }
+    if (!state.sessionId || !state.cart.items.length) return
+    const orderRes = await apiConfirmOrder({
+      sessionId: state.sessionId,
+      cartItems: state.cart.items,
+    })
+    setCart({ items: [] })
+    nav(`/kitchen?orderId=${encodeURIComponent(orderRes.orderId)}`)
   }
-
-  // ─── getItemsForCategory ─────────────────────────────────────────────────────
 
   function getItemsForCategory(catKey) {
     const all = menuItemsRef.current || []
@@ -697,26 +462,19 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
     })
   }
 
-  // ─── stopAll ─────────────────────────────────────────────────────────────────
-
   function stopAll() {
     clearAllTimers()
     stopSpeak()
     stopListening()
     stepRef.current = 'IDLE'
-    voiceLockRef.current = false
-    processingRef.current = false
     if (mountedRef.current) setVoiceStatus('IDLE')
   }
-
-  // ─── Effects ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
       processingRef.current = false
-      voiceLockRef.current = false
       lastProcessedRef.current = ''
       lastProcessedItemTimesRef.current = {}
       stepRef.current = 'IDLE'
@@ -737,11 +495,8 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
 
     lastProcessedRef.current = ''
     processingRef.current = false
-    voiceLockRef.current = false
     lastProcessedItemTimesRef.current = {}
     clearAllTimers()
-    pendingItemRef.current = null
-    pendingQtyRef.current = null
 
     if (page === 'MENU') {
       stepRef.current = 'CATEGORY'
@@ -758,8 +513,6 @@ export function useVoiceOrdering({ enabled, page, menuItems, onCartUpdated } = {
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, page])
-
-  // ─── Public API ───────────────────────────────────────────────────────────────
 
   return {
     stop: stopAll,
